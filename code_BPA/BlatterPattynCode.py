@@ -55,17 +55,10 @@ H = Function(Vbar)
 u_prev = Function(VV)
 u_prev_ts = Function(VV)
 
-rhoi = Constant(9.1380e-19)
-g = Constant(9.7692e15)
-
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(1e-26 * yearinsec * 1.0e18)
-Amp = Constant(500.0)
-x0 = Constant(5000.0)
-y0 = Constant(5000.0)
-sigma_R = Constant(1000.0)
-#H0 = Constant(100)
-#thick = Function(Vbar).interpolate(1000.0 + Amp * exp(-((x - x0)**2 + (y - y0)**2) / sigma_R**2))
+g = 9.8*yearinsec**2
+rhoi = 900.0/(1.0e6*yearinsec**2)
 
 alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx

@@ -7,8 +7,8 @@ Lx = 80000.0
 Ly = 80000.0
 nz = 10
 
-#base = PeriodicRectangleMesh(50, 50, Lx, Ly)
-base = RectangleMesh(50, 50, Lx, Ly)
+base = PeriodicRectangleMesh(50, 50, Lx, Ly)
+#base = RectangleMesh(50, 50, Lx, Ly)
 
 nz = 10
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -61,12 +61,14 @@ A = Constant(4.6e-25 * yearinsec * 1.0e18)
 alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 tan_alpha = np.tan(alpha)
-g = [0.0, 0.0, 9.8*yearinsec**2]
-#g = Constant((gmag * np.sin(alpha), 0.0, -gmag * np.cos(alpha)))
+g = 9.8*yearinsec**2
 rhoi = 900.0/(1.0e6*yearinsec**2)
 
-zs = Function(Vbar, name="zs").interpolate(-tan_alpha * x)
-zb = Function(Vbar, name="zb").interpolate(-tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
+#zs = Function(Vbar, name="zs").interpolate(-tan_alpha * x)
+#zb = Function(Vbar, name="zb").interpolate(-tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
+
+zs = Function(Vbar, name="zs").interpolate(0.0)
+zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
@@ -86,13 +88,12 @@ def viscosity(ux, uy, n=1):
 mu = 1
 ns = np.linspace(1, 3, 11)
 
-dt = 0.001                           # Time-step size
+dt = 0.1                           # Time-step size
 theta = Constant(0.0)              # TSS activated: theta=1, TSS deactivated: theta=0
 T = 1                              # Simulation length 
 num_TS = int(T / dt)
 
-bcs = [DirichletBC(VV, Constant((0.0, 0.0)), "bottom"),
-       DirichletBC(VV, Constant((0.0, 0.0)), (1, 2, 3, 4))]
+bcs = [DirichletBC(VV, Constant((0.0, 0.0)), "bottom")]
 
 outfile = VTKFile("BPA_output.pvd")
 VTKFile("mesh.pvd").write(mesh)
@@ -118,8 +119,9 @@ for i in range(num_TS):
                 + (mu * u2.dx(0) + mu * u1.dx(1)) * v2.dx(0) * dx \
                 + mu * u2.dx(2) * v2.dx(2) * dx
 
-            L = rhoi * g[2] * zs * v1.dx(0) * dx \
-            + rhoi * g[2] * zs * v2.dx(1) * dx
+            L = rhoi * g * np.cos(alpha) * zs * v1.dx(0) * dx \
+            + rhoi * g * np.sin(alpha) * v1 * dx \
+            + rhoi * g * np.cos(alpha) * zs * v2.dx(1) * dx
 
             uvecold=uvec.copy(deepcopy=True)
             (uxold,uyold)=split(uvecold)
@@ -136,7 +138,6 @@ for i in range(num_TS):
 
     print("Solving thickness evolution now...")
 
-    # Here, I need to vertically average the velocity... this needs to be fixed.
     ubar = Function(VVbar, name="u_bar")
     ubar.project(uvec)
     ux_bar, uy_bar = split(ubar)

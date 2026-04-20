@@ -7,7 +7,7 @@ Lx = 80000.0
 Ly = 80000.0
 nz = 10
 
-base = PeriodicRectangleMesh(50, 50, Lx, Ly)
+base = RectangleMesh(50, 50, Lx, Ly)
 
 nz = 10
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -17,7 +17,7 @@ Xref = Function(mesh.coordinates.function_space(), name="Xref")
 Xref.interpolate(SpatialCoordinate(mesh))
 xref, yref, sigmaref = split(Xref)
 
-# Horizontal and vertical factors
+# Horizontal and vertical elements
 horiz = FiniteElement("CG", triangle, 1)
 vert  = FiniteElement("CG", interval, 1)
 
@@ -56,7 +56,7 @@ u_prev = Function(VV)
 u_prev_ts = Function(VV)
 
 yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(1e-26 * yearinsec * 1.0e18)
+A = Constant(4.6e-25 * yearinsec * 1.0e18)
 g = 9.8*yearinsec**2
 rhoi = 900.0/(1.0e6*yearinsec**2)
 
@@ -65,14 +65,10 @@ omega = 2.0*np.pi / Lx
 tan_alpha = np.tan(alpha)
 
 zs = Function(Vbar, name="zs").interpolate(-tan_alpha * x)
-
-zb = Function(Vbar, name="zb").interpolate(
-    -tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y)
-)
-
+zb = Function(Vbar, name="zb").interpolate(-tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
-mesh.coordinates.interpolate(as_vector([xref, yref, sigmaref * thick]))
+mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
 eps = Constant(1e-10)
 
 def viscosity(ux, uy, n=1):
@@ -89,10 +85,13 @@ def viscosity(ux, uy, n=1):
 mu = 1
 ns = np.linspace(1, 3, 11)
 
-dt= 0.01                           # Time-step size
+dt = 0.001                           # Time-step size
 theta = Constant(0.0)              # TSS activated: theta=1, TSS deactivated: theta=0
 T = 1                              # Simulation length 
 num_TS = int(T / dt)
+
+bcs = [DirichletBC(VV, Constant((0.0, 0.0)), "bottom"),
+       DirichletBC(VV, Constant((0.0, 0.0)), (1, 2, 3, 4))]
 
 outfile = VTKFile("BPA_output.pvd")
 VTKFile("mesh.pvd").write(mesh)
@@ -124,7 +123,7 @@ for i in range(num_TS):
             uvecold=uvec.copy(deepcopy=True)
             (uxold,uyold)=split(uvecold)
             print("Solving momentum")
-            solve(a == L, uvec)
+            solve(a == L, uvec, bcs)
 
             du = Function(VV)
             du.assign(uvec)
@@ -158,7 +157,7 @@ for i in range(num_TS):
     solve(lhs(F) == rhs(F), H)
     thick.assign(H)
     thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
-    mesh.coordinates.interpolate(as_vector([xref, yref, sigmaref * zs]))
+    mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
     print("Finished solving thickness evolution...")
     print("Year: ", (i+1)*dt)
 

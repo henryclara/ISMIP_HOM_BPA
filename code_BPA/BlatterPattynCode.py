@@ -2,7 +2,14 @@ from firedrake import *
 from netgen.occ import *
 import time
 
-# 2D base mesh
+'''
+Lx = 10000.0
+Ly = 10000.0
+nz = 10
+
+base = PeriodicRectangleMesh(100, 100, Lx, Ly)
+'''
+
 base = UnitSquareMesh(100, 100)
 base.coordinates.dat.data[:] *= 10000.0
 
@@ -81,15 +88,13 @@ def viscosity(ux, uy, n=1):
 mu = 1
 ns = np.linspace(1, 3, 11)
 
-bcs = [DirichletBC(VV.sub(0), 0.0, (1, 2, 3, 4)),
-       DirichletBC(VV.sub(1), 0.0, (1, 2, 3, 4))]
-
 dt= 0.01                           # Time-step size
 theta = Constant(0.0)              # TSS activated: theta=1, TSS deactivated: theta=0
-T = 50                             # Simulation length
+T = 1                              # Simulation length 
 num_TS = int(T / dt)
 
-outfile = VTKFile("BPA_put.pvd")
+outfile = VTKFile("BPA_output.pvd")
+VTKFile("mesh.pvd").write(mesh)
 
 for i in range(num_TS):
     for j, n in enumerate(ns):
@@ -118,7 +123,7 @@ for i in range(num_TS):
             uvecold=uvec.copy(deepcopy=True)
             (uxold,uyold)=split(uvecold)
             print("Solving momentum")
-            solve(a == L, uvec, bcs)
+            solve(a == L, uvec)
 
             du = Function(VV)
             du.assign(uvec)

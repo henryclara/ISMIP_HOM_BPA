@@ -3,10 +3,11 @@ from netgen.occ import *
 import numpy as np
 import time
 
-L = 80000.0
+Lx = 80000.0
+Ly = 80000.0
 nz = 10
 
-base = PeriodicRectangleMesh(100, 100, L, L)
+base = PeriodicRectangleMesh(50, 50, Lx, Ly)
 
 nz = 10
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -67,17 +68,16 @@ sigma_R = Constant(1000.0)
 #thick = Function(Vbar).interpolate(1000.0 + Amp * exp(-((x - x0)**2 + (y - y0)**2) / sigma_R**2))
 
 alpha = np.deg2rad(0.5)
-omega = 2.0*np.pi / L
+omega = 2.0*np.pi / Lx
 tan_alpha = np.tan(alpha)
 
-zs = Function(V, name="zs").interpolate(-tan_alpha * x)
+zs = Function(Vbar, name="zs").interpolate(-tan_alpha * x)
 
-zb = Function(V, name="zb").interpolate(
+zb = Function(Vbar, name="zb").interpolate(
     -tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y)
 )
 
-thick = Function(V, name="thick")
-thick.interpolate(zs - zb)
+thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, sigmaref * thick]))
 eps = Constant(1e-10)
@@ -125,8 +125,8 @@ for i in range(num_TS):
                 + (mu * u2.dx(0) + mu * u1.dx(1)) * v2.dx(0) * dx \
                 + mu * u2.dx(2) * v2.dx(2) * dx
 
-            L = rhoi * g * thick * v1.dx(0) * dx \
-            + rhoi * g * thick * v2.dx(1) * dx
+            L = rhoi * g * zs * v1.dx(0) * dx \
+            + rhoi * g * zs * v2.dx(1) * dx
 
             uvecold=uvec.copy(deepcopy=True)
             (uxold,uyold)=split(uvecold)
@@ -143,7 +143,7 @@ for i in range(num_TS):
 
     print("Solving thickness evolution now...")
 
-    # Here, I need to vertically average the velocity...
+    # Here, I need to vertically average the velocity... this needs to be fixed.
     ubar = Function(VVbar, name="u_bar")
     ubar.project(uvec)
     ux_bar, uy_bar = split(ubar)
@@ -165,7 +165,7 @@ for i in range(num_TS):
     solve(lhs(F) == rhs(F), H)
     thick.assign(H)
     thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
-    mesh.coordinates.interpolate(as_vector([xref, yref, sigmaref * thick]))
+    mesh.coordinates.interpolate(as_vector([xref, yref, sigmaref * zs]))
     print("Finished solving thickness evolution...")
     print("Year: ", (i+1)*dt)
 

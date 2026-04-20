@@ -7,6 +7,7 @@ Lx = 80000.0
 Ly = 80000.0
 nz = 10
 
+#base = PeriodicRectangleMesh(50, 50, Lx, Ly)
 base = RectangleMesh(50, 50, Lx, Ly)
 
 nz = 10
@@ -57,12 +58,12 @@ u_prev_ts = Function(VV)
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(4.6e-25 * yearinsec * 1.0e18)
-g = 9.8*yearinsec**2
-rhoi = 900.0/(1.0e6*yearinsec**2)
-
 alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 tan_alpha = np.tan(alpha)
+g = [0.0, 0.0, 9.8*yearinsec**2]
+#g = Constant((gmag * np.sin(alpha), 0.0, -gmag * np.cos(alpha)))
+rhoi = 900.0/(1.0e6*yearinsec**2)
 
 zs = Function(Vbar, name="zs").interpolate(-tan_alpha * x)
 zb = Function(Vbar, name="zb").interpolate(-tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
@@ -117,8 +118,8 @@ for i in range(num_TS):
                 + (mu * u2.dx(0) + mu * u1.dx(1)) * v2.dx(0) * dx \
                 + mu * u2.dx(2) * v2.dx(2) * dx
 
-            L = rhoi * g * zs * v1.dx(0) * dx \
-            + rhoi * g * zs * v2.dx(1) * dx
+            L = rhoi * g[2] * zs * v1.dx(0) * dx \
+            + rhoi * g[2] * zs * v2.dx(1) * dx
 
             uvecold=uvec.copy(deepcopy=True)
             (uxold,uyold)=split(uvecold)

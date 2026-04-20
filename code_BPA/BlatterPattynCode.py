@@ -1,17 +1,12 @@
 from firedrake import *
 from netgen.occ import *
+import numpy as np
 import time
 
-'''
-Lx = 10000.0
-Ly = 10000.0
+L = 80000.0
 nz = 10
 
-base = PeriodicRectangleMesh(100, 100, Lx, Ly)
-'''
-
-base = UnitSquareMesh(100, 100)
-base.coordinates.dat.data[:] *= 10000.0
+base = PeriodicRectangleMesh(100, 100, L, L)
 
 nz = 10
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -68,8 +63,21 @@ Amp = Constant(500.0)
 x0 = Constant(5000.0)
 y0 = Constant(5000.0)
 sigma_R = Constant(1000.0)
-H0 = Constant(100)
-thick = Function(Vbar).interpolate(1000.0 + Amp * exp(-((x - x0)**2 + (y - y0)**2) / sigma_R**2))
+#H0 = Constant(100)
+#thick = Function(Vbar).interpolate(1000.0 + Amp * exp(-((x - x0)**2 + (y - y0)**2) / sigma_R**2))
+
+alpha = np.deg2rad(0.5)
+omega = 2.0*np.pi / L
+tan_alpha = np.tan(alpha)
+
+zs = Function(V, name="zs").interpolate(-tan_alpha * x)
+
+zb = Function(V, name="zb").interpolate(
+    -tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y)
+)
+
+thick = Function(V, name="thick")
+thick.interpolate(zs - zb)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, sigmaref * thick]))
 eps = Constant(1e-10)

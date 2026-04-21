@@ -8,7 +8,6 @@ Ly = 80000.0
 nz = 10
 
 base = PeriodicRectangleMesh(50, 50, Lx, Ly)
-#base = RectangleMesh(50, 50, Lx, Ly)
 
 nz = 10
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -64,9 +63,6 @@ tan_alpha = np.tan(alpha)
 g = 9.8*yearinsec**2
 rhoi = 900.0/(1.0e6*yearinsec**2)
 
-#zs = Function(Vbar, name="zs").interpolate(-tan_alpha * x)
-#zb = Function(Vbar, name="zb").interpolate(-tan_alpha * x - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
-
 zs = Function(Vbar, name="zs").interpolate(0.0)
 zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
@@ -88,12 +84,16 @@ def viscosity(ux, uy, n=1):
 mu = 1
 ns = np.linspace(1, 3, 11)
 
-dt = 0.1                           # Time-step size
+# Basal friction field
+beta2 = Function(Vbar, name="beta2")
+beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx) * sin(2.0*np.pi*y/Lx)))
+
+dt = 1.0                           # Time-step size
 theta = Constant(0.0)              # TSS activated: theta=1, TSS deactivated: theta=0
-T = 1                              # Simulation length 
+T = 50.                            # Simulation length 
 num_TS = int(T / dt)
 
-bcs = [DirichletBC(VV, Constant((0.0, 0.0)), "bottom")]
+#bcs = [DirichletBC(VV, Constant((0.0, 0.0)), "bottom")]
 
 outfile = VTKFile("BPA_output.pvd")
 VTKFile("mesh.pvd").write(mesh)
@@ -118,6 +118,8 @@ for i in range(num_TS):
             a += (4 * mu * u2.dx(1) + 2 * mu * u1.dx(0)) * v2.dx(1) * dx \
                 + (mu * u2.dx(0) + mu * u1.dx(1)) * v2.dx(0) * dx \
                 + mu * u2.dx(2) * v2.dx(2) * dx
+            
+            a += beta2 * dot(uvect, vvect) * ds_b
 
             L = rhoi * g * np.cos(alpha) * zs * v1.dx(0) * dx \
             + rhoi * g * np.sin(alpha) * v1 * dx \
@@ -126,7 +128,7 @@ for i in range(num_TS):
             uvecold=uvec.copy(deepcopy=True)
             (uxold,uyold)=split(uvecold)
             print("Solving momentum")
-            solve(a == L, uvec, bcs)
+            solve(a == L, uvec)
 
             du = Function(VV)
             du.assign(uvec)

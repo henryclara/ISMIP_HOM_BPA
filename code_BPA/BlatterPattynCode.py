@@ -25,6 +25,7 @@ vert  = FiniteElement("CG", interval, 1)
 scalar_elt = TensorProductElement(horiz, vert)
 V = FunctionSpace(mesh, scalar_elt)
 
+
 vector_elt = VectorElement(scalar_elt, dim=2)
 VV = FunctionSpace(mesh, vector_elt)
 

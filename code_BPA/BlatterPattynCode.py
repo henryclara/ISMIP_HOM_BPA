@@ -25,7 +25,6 @@ vert  = FiniteElement("CG", interval, 1)
 scalar_elt = TensorProductElement(horiz, vert)
 V = FunctionSpace(mesh, scalar_elt)
 
-
 vector_elt = VectorElement(scalar_elt, dim=2)
 VV = FunctionSpace(mesh, vector_elt)
 
@@ -89,8 +88,10 @@ ns = np.linspace(1, 3, 11)
 beta2 = Function(Vbar, name="beta2")
 beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx) * sin(2.0*np.pi*y/Lx)))
 
+a_s = 1.0
+a_b = 0.9
 dt = 1.0                           # Time-step size
-theta = Constant(0.0)              # TSS activated: theta=1, TSS deactivated: theta=0
+theta = Constant(1.0)              # TSS activated: theta=1, TSS deactivated: theta=0
 T = 50.                            # Simulation length 
 num_TS = int(T / dt)
 
@@ -124,7 +125,11 @@ for i in range(num_TS):
 
             L = rhoi * g * np.cos(alpha) * zs * v1.dx(0) * dx \
             + rhoi * g * np.sin(alpha) * v1 * dx \
-            + rhoi * g * np.cos(alpha) * zs * v2.dx(1) * dx
+            + rhoi * g * np.cos(alpha) * zs * v2.dx(1) * dx \
+            - theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \
+            - theta * rhoi * g * dt * (a_s - a_b) * zb.dx(1) * v2 * dx \
+            + theta * rhoi * g * dt * thick * (a_s - a_b) * v1.dx(0) * dx
+            + theta * rhoi * g * dt * thick * (a_s - a_b) * v2.dx(1) * dx
 
             uvecold=uvec.copy(deepcopy=True)
             (uxold,uyold)=split(uvecold)

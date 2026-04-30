@@ -8,7 +8,7 @@ Ly = 80000.0
 nz = 10
 
 #base = RectangleMesh(50, 50, Lx, Ly)
-base = PeriodicRectangleMesh(50, 50, Lx, Ly)
+base = PeriodicRectangleMesh(100, 100, Lx, Ly)
 
 nz = 10
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -57,7 +57,7 @@ u_prev = Function(VV)
 u_prev_ts = Function(VV)
 
 yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(4.6e-25 * yearinsec * 1.0e18)
+A = Constant(4.6e-26 * yearinsec * 1.0e18)
 #alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 #tan_alpha = np.tan(alpha)
@@ -98,21 +98,8 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx) * sin(2.0*np.pi*y/Lx)))
 a_s = 0.0
 a_b = 0.0
 
-#dt = 10.0                          # Time-step size
-#zeta = Constant(0.0)               # zeta=0: grounded ice, zeta=1: floating ice
-#theta_out = 1.0
-#theta = Constant(theta_out)         # TSS activated: theta=1, TSS deactivated: theta=0
-#T = 1000.0                          # Simulation length
-#num_TS = int(T / dt)
 
-#bcs = [DirichletBC(VV, Constant((0.0, 0.0)), (1, 2, 3, 4))]
-
-#outfile = VTKFile(f"BPA_output_dt{dt:g}_theta{theta_out:g}.pvd")
-
-#for i in range(num_TS):
-
-
-dts = [0.001]
+dts = [50, 25, 10, 5, 2, 1]
 theta_outs = [1, 0]
 
 zeta = Constant(0.0)
@@ -140,7 +127,7 @@ for dt in dts:
         u_prev.assign(0.0)
         u_prev_ts.assign(0.0)
 
-        outfile = VTKFile(f"BPA_output_dt{dt:g}_theta{theta_out:g}.pvd")
+        outfile = VTKFile(f"BPA_output_dt{dt:g}_theta{theta_out:g}_A4.6e-26_nx100.pvd")
 
         for i in range(num_TS):
             for j, n in enumerate(ns):
@@ -228,5 +215,9 @@ for dt in dts:
             print("Year: ", (i+1)*dt)
 
             t = (i + 1) * dt
-            uout.interpolate(as_vector([ux, uy, 0.0]))
-            outfile.write(uout, thick, time=t)
+
+            if abs(t % 50.0) < 1.0e-10 or abs((t % 50.0) - 50.0) < 1.0e-10:
+                uout.interpolate(as_vector([ux, uy, 0.0]))
+                outfile.write(uout, thick, time=t)
+
+

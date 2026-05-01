@@ -59,7 +59,7 @@ u_prev = Function(VV)
 u_prev_ts = Function(VV)
 
 yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(4.6e-26 * yearinsec * 1.0e18)
+A = Constant(1.0e-25 * yearinsec * 1.0e18)
 #alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 #tan_alpha = np.tan(alpha)
@@ -94,6 +94,7 @@ def viscosity(ux, uy, n=1):
 
 mu = 1
 ns = [3] #np.linspace(1, 3, 11)
+n = 3
 
 # Basal friction field
 beta2 = Function(Vbar, name="beta2")
@@ -104,166 +105,164 @@ a_b = 0.0
 
 
 dts = [10]
+dt = 10
 theta_outs = [1]
+theta_out = 1
 
 zeta = Constant(0.0)
 T = 2000.0
 
 bcs = [DirichletBC(VV, Constant((0.0, 0.0)), (1, 2, 3, 4))]
 
-for dt in dts:
-    for theta_out in theta_outs:
+print("=" * 80)
+print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
+print("=" * 80)
 
-        print("=" * 80)
-        print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
-        print("=" * 80)
+theta = Constant(theta_out)
+num_TS = int(T / dt)
 
-        theta = Constant(theta_out)
-        num_TS = int(T / dt)
+# Reset initial geometry/state for this run
+zs.interpolate(0.0)
+zb.interpolate(zs - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
+thick.interpolate(zs - zb)
+thick_old.assign(thick)
+mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
 
-        # Reset initial geometry/state for this run
-        zs.interpolate(0.0)
-        zb.interpolate(zs - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
-        thick.interpolate(zs - zb)
-        thick_old.assign(thick)
-        mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
+uvec.assign(0.0)
+u_prev.assign(0.0)
+u1prev, u2prev = split(u_prev)
+u_prev_ts.assign(0.0)
 
-        uvec.assign(0.0)
-        u_prev.assign(0.0)
-        u1prev, u2prev = split(u_prev)
-        u_prev_ts.assign(0.0)
+outfile = VTKFile(f"Simulations/BPA_output_dt{dt:g}_theta{theta_out:g}_tole2e3.pvd")
 
-        outfile = VTKFile(f"BPA_output_dt{dt:g}_theta{theta_out:g}_tole2e3.pvd")
+for i in range(num_TS):
+    print("Solving with n = ", n)
+    tol = 1e-2          # momentum Picard tolerance
+    tol_citer = 1e-3    # coupled u-H tolerance
+    maxiter = 200
+    maxiter_citer = 1
 
-        for i in range(num_TS):
-            for j, n in enumerate(ns):
-                print("Solving with n = ", n)
-                tol = 1e-2          # momentum Picard tolerance
-                tol_citer = 1e-3    # coupled u-H tolerance
-                maxiter = 200
-                maxiter_citer = 1
+    change_u_coupled = 1.0
+    change_H_coupled = 1.0
+    iter_sim_citer = 0
 
-                change_u_coupled = 1.0
-                change_H_coupled = 1.0
-                iter_sim_citer = 0
+    while max(change_u_coupled, change_H_coupled) > tol_citer and iter_sim_citer < maxiter_citer:
+        iter_sim_citer += 1
+        print("Coupled iteration: ", iter_sim_citer)
 
-                while max(change_u_coupled, change_H_coupled) > tol_citer and iter_sim_citer < maxiter_citer:
-                    iter_sim_citer += 1
-                    print("Coupled iteration: ", iter_sim_citer)
+        uvec_coupled_old = uvec.copy(deepcopy=True)
+        thick_coupled_old = thick.copy(deepcopy=True)
 
-                    uvec_coupled_old = uvec.copy(deepcopy=True)
-                    thick_coupled_old = thick.copy(deepcopy=True)
+        change = 100.0
+        iter_sim = 0
 
-                    change = 100.0
-                    iter_sim = 0
-
-                    while change > tol and iter_sim < maxiter:
-                        iter_sim=iter_sim+1
+        while change > tol and iter_sim < maxiter:
+            iter_sim=iter_sim+1
  
-                        mu = viscosity(ux, uy, n)
-                        grad_zs_H = as_vector([zs.dx(0), zs.dx(1)])
-                        surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
+            mu = viscosity(ux, uy, n)
+            grad_zs_H = as_vector([zs.dx(0), zs.dx(1)])
+            surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
 
-                        a = (4 * mu * u1.dx(0) + 2 * mu * u2.dx(1)) * v1.dx(0) * dx \
+            a = (4 * mu * u1.dx(0) + 2 * mu * u2.dx(1)) * v1.dx(0) * dx \
                             + (mu * u1.dx(1) + mu * u2.dx(0)) * v1.dx(1) * dx \
                             + mu * u1.dx(2) * v1.dx(2) * dx
                         
-                        a += (4 * mu * u2.dx(1) + 2 * mu * u1.dx(0)) * v2.dx(1) * dx \
+            a += (4 * mu * u2.dx(1) + 2 * mu * u1.dx(0)) * v2.dx(1) * dx \
                             + (mu * u2.dx(0) + mu * u1.dx(1)) * v2.dx(0) * dx \
                             + mu * u2.dx(2) * v2.dx(2) * dx
                         
-                        a += beta2 * dot(uvect, vvect) * ds_b
+            a += beta2 * dot(uvect, vvect) * ds_b
 
-                        # The stabilisation terms
-                        a += theta * rhoi * g * np.cos(psi) * dt * thick * (u1 * zs.dx(0) + u2 * zs.dx(1)) \
+            # The stabilisation terms
+            a += theta * rhoi * g * np.cos(psi) * dt * thick * (u1 * zs.dx(0) + u2 * zs.dx(1)) \
                             * (v1.dx(0) + v2.dx(1)) * surf * ds_t
-                        a += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
+            a += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
                             * thick * (u1.dx(0) + u2.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
 
-                        L = rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
+            L = rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
                         + rhoi * g * np.sin(psi) * v1 * dx
 
-                        # Add the adapted FSSA terms to the RHS
-                        '''
-                        if iter_sim_citer > 1:
+            # Add the adapted FSSA terms to the RHS
+            '''
+            if iter_sim_citer > 1:
 
-                            L += theta * rhoi * g * np.cos(psi) * dt * thick * (u1prev * zs.dx(0) + u2prev * zs.dx(1)) \
-                                * (v1.dx(0) + v2.dx(1)) * surf * ds_t \
-                                + theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                                * thick * (u1prev.dx(0) + u2prev.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
-                        '''
-                        # Ignore accumulation for now.
-                        #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \
-                        #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(1) * v2 * dx \
-                        #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v1.dx(0) * dx \
-                        #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v2.dx(1) * dx
+                L += theta * rhoi * g * np.cos(psi) * dt * thick * (u1prev * zs.dx(0) + u2prev * zs.dx(1)) \
+                    * (v1.dx(0) + v2.dx(1)) * surf * ds_t \
+                    + theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
+                    * thick * (u1prev.dx(0) + u2prev.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
+            '''
+            # Ignore accumulation for now.
+            #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \
+            #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(1) * v2 * dx \
+             #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v1.dx(0) * dx \
+            #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v2.dx(1) * dx
 
-                        uvecold=uvec.copy(deepcopy=True)
-                        (uxold,uyold)=split(uvecold)
-                        print("Solving momentum")
-                        solve(a == L, uvec)
+            uvecold=uvec.copy(deepcopy=True)
+            (uxold,uyold)=split(uvecold)
+            print("Solving momentum")
+            solve(a == L, uvec)
 
-                        du = Function(VV)
-                        du.assign(uvec)
-                        du -= uvecold
-                        change = norm(du) / max(norm(uvec), 1.0e-12)
+            du = Function(VV)
+            du.assign(uvec)
+            du -= uvecold
+            change = norm(du) / max(norm(uvec), 1.0e-12)
 
-                        u_prev.assign(uvec)
-                        u1prev, u2prev = split(u_prev)
-                        print("change:", change)
+            u_prev.assign(uvec)
+            u1prev, u2prev = split(u_prev)
+            print("change:", change)
 
-                    print("Solving thickness evolution now...")
+        print("Solving thickness evolution now...")
 
-                    ubar = Function(VVbar, name="u_bar")
-                    ubar.project(uvec)
-                    ux_bar, uy_bar = split(ubar)
+        ubar = Function(VVbar, name="u_bar")
+        ubar.project(uvec)
+        ux_bar, uy_bar = split(ubar)
 
-                    vel = as_vector([ux_bar, uy_bar])
-                    vnorm = sqrt(dot(vel, vel) + 1e-10)
-                    h = CellDiameter(mesh)
-                    mu_art = 0.1 * h * vnorm
+        vel = as_vector([ux_bar, uy_bar])
+        vnorm = sqrt(dot(vel, vel) + 1e-10)
+        h = CellDiameter(mesh)
+        mu_art = 0.1 * h * vnorm
 
-                    F = (
-                        thick_new * phi * dx
-                        - thick_old * phi * dx
-                        + dt * (ux_bar * thick_new).dx(0) * phi * dx
-                        + dt * (uy_bar * thick_new).dx(1) * phi * dx
-                        + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
-                    )
+        F = (
+            thick_new * phi * dx
+            - thick_old * phi * dx
+            + dt * (ux_bar * thick_new).dx(0) * phi * dx
+            + dt * (uy_bar * thick_new).dx(1) * phi * dx
+            + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
+        )
 
-                    solve(lhs(F) == rhs(F), H)
+        solve(lhs(F) == rhs(F), H)
 
-                    thick.assign(H)
-                    thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
+        thick.assign(H)
+        thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
 
-                    zs.assign(zb + thick)
+        zs.assign(zb + thick)
 
-                    mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
+        mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
 
-                    du_coupled = Function(VV)
-                    du_coupled.assign(uvec)
-                    du_coupled -= uvec_coupled_old
+        du_coupled = Function(VV)
+        du_coupled.assign(uvec)
+        du_coupled -= uvec_coupled_old
 
-                    dH_coupled = Function(Vbar)
-                    dH_coupled.assign(thick)
-                    dH_coupled -= thick_coupled_old
+        dH_coupled = Function(Vbar)
+        dH_coupled.assign(thick)
+        dH_coupled -= thick_coupled_old
 
-                    change_u_coupled = norm(du_coupled) / max(norm(uvec), 1.0e-12)
-                    change_H_coupled = norm(dH_coupled) / max(norm(thick), 1.0e-12)
+        change_u_coupled = norm(du_coupled) / max(norm(uvec), 1.0e-12)
+        change_H_coupled = norm(dH_coupled) / max(norm(thick), 1.0e-12)
 
-                    print("Finished solving thickness evolution...")
-                    print("coupled velocity change:", change_u_coupled)
-                    print("coupled thickness change:", change_H_coupled)
-                    print("coupled max change:", max(change_u_coupled, change_H_coupled))
-                    print("Year: ", (i+1)*dt)
+        print("Finished solving thickness evolution...")
+        print("coupled velocity change:", change_u_coupled)
+        print("coupled thickness change:", change_H_coupled)
+        print("coupled max change:", max(change_u_coupled, change_H_coupled))
+        print("Year: ", (i+1)*dt)
                 
-                thick_old.assign(thick)
+    thick_old.assign(thick)
 
-            t = (i + 1) * dt
+    t = (i + 1) * dt
 
-            uout.interpolate(as_vector([ux, uy, 0.0]))
-            outfile.write(uout, thick, time=t)
+    uout.interpolate(as_vector([ux, uy, 0.0]))
+    outfile.write(uout, thick, time=t)
 
-            #if abs(t % 50.0) < 1.0e-10 or abs((t % 50.0) - 50.0) < 1.0e-10:
-            #    uout.interpolate(as_vector([ux, uy, 0.0]))
-            #    outfile.write(uout, thick, time=t)
+#if abs(t % 50.0) < 1.0e-10 or abs((t % 50.0) - 50.0) < 1.0e-10:
+#    uout.interpolate(as_vector([ux, uy, 0.0]))
+#    outfile.write(uout, thick, time=t)

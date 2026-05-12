@@ -29,31 +29,25 @@ V = FunctionSpace(mesh, scalar_elt)
 vector_elt = VectorElement(scalar_elt, dim=2)
 VV = FunctionSpace(mesh, vector_elt)
 
-uvec=Function(VV)
-(ux,uy)=split(uvec)
-
-#uvect=TrialFunction(VV)
-#(u1,u2)=split(uvect)
-
-#vvect=TestFunction(VV)
-#(v1,v2)=split(vvect)
-
-du = TrialFunction(VV)
-vvect = TestFunction(VV)
-v1, v2 = split(vvect)
-
-ux, uy = split(uvec)
-
 # Vector-valued version of the same tensor-product space
 vector3_elt = VectorElement(scalar_elt, dim=3)
 VV3 = FunctionSpace(mesh, vector3_elt)
 uout = Function(VV3, name="uout")
 
-# vertically constant scalar space
 Vbar = FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
-
-# vertically constant 2-component vector space
 VVbar = VectorFunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0, dim=2)
+
+W = VV * Vbar
+
+w = Function(W)
+uvec, q = split(w)
+ux, uy = split(uvec)
+
+dw = TrialFunction(W)
+vvect, r = TestFunctions(W)
+v1, v2 = split(vvect)
+
+uvec_out = Function(VV, name="uvec")
 
 phi = TestFunction(Vbar)
 thick_new = TrialFunction(Vbar)
@@ -76,8 +70,6 @@ zs = Function(Vbar, name="zs").interpolate(0.0)
 zb = Function(Vbar, name="zb").interpolate(zs - 1000.0 \
              + 500.0 * sin(omega * x) * sin(omega * y))
 
-#zs = Function(Vbar, name="zs").interpolate(0.0)
-#zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
@@ -104,14 +96,11 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx) * sin(2.0*np.pi*y/Lx)))
 a_s = 0.0
 a_b = 0.0
 
-
-dts = [5, 2, 1]
-theta_outs = [1, 0]
+dts = [0.1]
+theta_outs = [0]
 
 zeta = Constant(0.0)
 T = 2000.0
-
-#bcs = [DirichletBC(VV, Constant((0.0, 0.0)), (1, 2, 3, 4))]
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -123,14 +112,21 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        # Reset initial geometry/state for this run
         zs.interpolate(0.0)
         zb.interpolate(zs - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
         thick.interpolate(zs - zb)
         mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
 
-        #uvec.assign(0.0)
-        uvec.interpolate(Constant((10.0, 0.0)))
+        u_init = as_vector([10.0 * (1.0 + 0.01 * sin(2.0*pi*x/Lx) * sin(2.0*pi*y/Ly)), \
+                            10.0 * (0.01 * sin(2.0*pi*x/Lx) * sin(2.0*pi*y/Ly)),])
+
+        w.sub(0).interpolate(u_init)
+
+        u0 = w.sub(0)
+        ux0, uy0 = split(u0)
+
+        w.sub(1).project(thick * (ux0.dx(0) + uy0.dx(1)))
+
         u_prev.assign(0.0)
         u_prev_ts.assign(0.0)
 
@@ -152,6 +148,8 @@ for dt in dts:
                 grad_zs_H = as_vector([zs.dx(0), zs.dx(1)])
                 surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
 
+                #q.project(thick * (ux.dx(0) + uy.dx(1)))
+
                 F = (4 * mu * ux.dx(0) + 2 * mu * uy.dx(1)) * v1.dx(0) * dx \
                                 + (mu * ux.dx(1) + mu * uy.dx(0)) * v1.dx(1) * dx \
                                 + mu * ux.dx(2) * v1.dx(2) * dx
@@ -165,8 +163,21 @@ for dt in dts:
                 # The stabilisation terms
                 F += theta * rhoi * g * np.cos(psi) * dt * thick * (ux * zs.dx(0) + uy * zs.dx(1)) \
                                 * (v1.dx(0) + v2.dx(1)) * surf * ds_t
+
                 F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                                * thick * (ux.dx(0) + uy.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
+                                * q * (v1.dx(0) + v2.dx(1)) * dx
+
+                div_h = ux.dx(0) + uy.dx(1)
+
+                eps_q = Constant(1.0e-8)
+
+                F += theta * r * q * dx
+                F -= theta * r * thick * div_h * dx
+                #F += theta * eps_q * r * q * dx
+
+                # This is the tricky stabilisation term (old version)
+                #F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
+                #                * thick * (ux.dx(0) + uy.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
 
                 F -= rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
                             - rhoi * g * np.sin(psi) * v1 * dx
@@ -177,8 +188,11 @@ for dt in dts:
                     #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v1.dx(0) * dx \
                     #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v2.dx(1) * dx
 
-                J = derivative(F, uvec, du)
-                problem = NonlinearVariationalProblem(F, uvec, J=J)
+                #J = derivative(F, uvec, du)
+                #problem = NonlinearVariationalProblem(F, uvec, J=J)
+
+                J = derivative(F, w, dw)
+                problem = NonlinearVariationalProblem(F, w, J=J)
 
                 solver = NonlinearVariationalSolver(
                     problem,
@@ -188,31 +202,28 @@ for dt in dts:
                         "snes_rtol": 1.0e-8,
                         "snes_atol": 1.0e-10,
                         "snes_max_it": 50,
+
+                        "mat_type": "aij",
                         "ksp_type": "preonly",
                         "pc_type": "lu",
+                        "pc_factor_mat_solver_type": "mumps",
+
+                        "snes_monitor": None,
+                        "ksp_monitor_true_residual": None,
+                        "ksp_error_if_not_converged": None,
                     },
                 )
 
-                #uvecold=uvec.copy(deepcopy=True)
-                #(uxold,uyold)=split(uvecold)
-                #print("Solving momentum")
-                #solve(a == L, uvec)
-
                 solver.solve()
-                u_prev.assign(uvec)
-
-                #du = Function(VV)
-                #du.assign(uvec)
-                #du -= uvecold
-                #change = norm(du) / max(norm(uvec), 1.0e-12)
-
-                u_prev.assign(uvec)
-                #print("change:", change)
+                uvec_out.assign(w.sub(0))
+                u_prev.assign(uvec_out)
 
             print("Solving thickness evolution now...")
 
             ubar = Function(VVbar, name="u_bar")
-            ubar.project(uvec)
+
+            # This needs improvement. We need to solve a weak form problem here.
+            ubar.project(uvec_out)
             ux_bar, uy_bar = split(ubar)
 
             vel = as_vector([ux_bar, uy_bar])
@@ -239,5 +250,7 @@ for dt in dts:
             t = (i + 1) * dt
 
             if abs(t % 50.0) < 1.0e-10 or abs((t % 50.0) - 50.0) < 1.0e-10:
-                uout.interpolate(as_vector([ux, uy, 0.0]))
+                #uout.interpolate(as_vector([ux, uy, 0.0]))
+                ux_out, uy_out = split(uvec_out)
+                uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
                 outfile.write(uout, thick, time=t)

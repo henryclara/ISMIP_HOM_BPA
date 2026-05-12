@@ -8,7 +8,7 @@ Ly = 80000.0
 nz = 10
 
 #base = RectangleMesh(50, 50, Lx, Ly)
-base = PeriodicRectangleMesh(100, 100, Lx, Ly)
+base = PeriodicRectangleMesh(50, 50, Lx, Ly)
 
 nz = 10
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -32,11 +32,17 @@ VV = FunctionSpace(mesh, vector_elt)
 uvec=Function(VV)
 (ux,uy)=split(uvec)
 
-uvect=TrialFunction(VV)
-(u1,u2)=split(uvect)
+#uvect=TrialFunction(VV)
+#(u1,u2)=split(uvect)
 
-vvect=TestFunction(VV)
-(v1,v2)=split(vvect)
+#vvect=TestFunction(VV)
+#(v1,v2)=split(vvect)
+
+du = TrialFunction(VV)
+vvect = TestFunction(VV)
+v1, v2 = split(vvect)
+
+ux, uy = split(uvec)
 
 # Vector-valued version of the same tensor-product space
 vector3_elt = VectorElement(scalar_elt, dim=3)
@@ -75,7 +81,7 @@ zb = Function(Vbar, name="zb").interpolate(zs - 1000.0 \
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
-eps = Constant(1e-10)
+eps = Constant(1e-6) # Constant(1e-10)
 
 def viscosity(ux, uy, n=1):
     '''
@@ -99,13 +105,13 @@ a_s = 0.0
 a_b = 0.0
 
 
-dts = [50, 25, 10, 5, 2, 1]
+dts = [5, 2, 1]
 theta_outs = [1, 0]
 
 zeta = Constant(0.0)
 T = 2000.0
 
-bcs = [DirichletBC(VV, Constant((0.0, 0.0)), (1, 2, 3, 4))]
+#bcs = [DirichletBC(VV, Constant((0.0, 0.0)), (1, 2, 3, 4))]
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -123,7 +129,8 @@ for dt in dts:
         thick.interpolate(zs - zb)
         mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
 
-        uvec.assign(0.0)
+        #uvec.assign(0.0)
+        uvec.interpolate(Constant((10.0, 0.0)))
         u_prev.assign(0.0)
         u_prev_ts.assign(0.0)
 
@@ -137,36 +144,32 @@ for dt in dts:
                 maxiter=200
                 iter_sim=0
 
-                while change>tol and iter_sim<maxiter:
-                    iter_sim=iter_sim+1
+                #while change>tol and iter_sim<maxiter:
+                #iter_sim=iter_sim+1
 
-                    mu = viscosity(ux, uy, n)
-                    grad_zs_H = as_vector([zs.dx(0), zs.dx(1)])
-                    surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
+                mu = viscosity(ux, uy, n)
 
-                    a = (4 * mu * u1.dx(0) + 2 * mu * u2.dx(1)) * v1.dx(0) * dx \
-                        + (mu * u1.dx(1) + mu * u2.dx(0)) * v1.dx(1) * dx \
-                        + mu * u1.dx(2) * v1.dx(2) * dx
-                    
-                    a += (4 * mu * u2.dx(1) + 2 * mu * u1.dx(0)) * v2.dx(1) * dx \
-                        + (mu * u2.dx(0) + mu * u1.dx(1)) * v2.dx(0) * dx \
-                        + mu * u2.dx(2) * v2.dx(2) * dx
-                    
-                    a += beta2 * dot(uvect, vvect) * ds_b
+                grad_zs_H = as_vector([zs.dx(0), zs.dx(1)])
+                surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
 
-                    # The stabilisation terms
-                    a += theta * rhoi * g * np.cos(psi) * dt * thick * (u1 * zs.dx(0) + u2 * zs.dx(1)) \
-                        * (v1.dx(0) + v2.dx(1)) * surf * ds_t
-                    a += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                        * thick * (u1.dx(0) + u2.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
+                F = (4 * mu * ux.dx(0) + 2 * mu * uy.dx(1)) * v1.dx(0) * dx \
+                                + (mu * ux.dx(1) + mu * uy.dx(0)) * v1.dx(1) * dx \
+                                + mu * ux.dx(2) * v1.dx(2) * dx
+                            
+                F += (4 * mu * uy.dx(1) + 2 * mu * ux.dx(0)) * v2.dx(1) * dx \
+                                + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
+                                + mu * uy.dx(2) * v2.dx(2) * dx
+                            
+                F += beta2 * dot(uvec, vvect) * ds_b
 
-                    L = rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
-                    + rhoi * g * np.sin(psi) * v1 * dx
+                # The stabilisation terms
+                F += theta * rhoi * g * np.cos(psi) * dt * thick * (ux * zs.dx(0) + uy * zs.dx(1)) \
+                                * (v1.dx(0) + v2.dx(1)) * surf * ds_t
+                F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
+                                * thick * (ux.dx(0) + uy.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
 
-                    # The following is with a tilted gravity vector.
-                    #L = rhoi * g * np.cos(alpha) * zs * v1.dx(0) * dx \
-                    #+ rhoi * g * np.sin(alpha) * v1 * dx \
-                    #+ rhoi * g * np.cos(alpha) * zs * v2.dx(1) * dx \
+                F -= rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
+                            - rhoi * g * np.sin(psi) * v1 * dx
                     
                     # Ignore accumulation for now.
                     #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \
@@ -174,18 +177,37 @@ for dt in dts:
                     #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v1.dx(0) * dx \
                     #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v2.dx(1) * dx
 
-                    uvecold=uvec.copy(deepcopy=True)
-                    (uxold,uyold)=split(uvecold)
-                    print("Solving momentum")
-                    solve(a == L, uvec)
+                J = derivative(F, uvec, du)
+                problem = NonlinearVariationalProblem(F, uvec, J=J)
 
-                    du = Function(VV)
-                    du.assign(uvec)
-                    du -= uvecold
-                    change = norm(du) / max(norm(uvec), 1.0e-12)
+                solver = NonlinearVariationalSolver(
+                    problem,
+                    solver_parameters={
+                        "snes_type": "newtonls",
+                        "snes_linesearch_type": "bt",
+                        "snes_rtol": 1.0e-8,
+                        "snes_atol": 1.0e-10,
+                        "snes_max_it": 50,
+                        "ksp_type": "preonly",
+                        "pc_type": "lu",
+                    },
+                )
 
-                    u_prev.assign(uvec)
-                    print("change:", change)
+                #uvecold=uvec.copy(deepcopy=True)
+                #(uxold,uyold)=split(uvecold)
+                #print("Solving momentum")
+                #solve(a == L, uvec)
+
+                solver.solve()
+                u_prev.assign(uvec)
+
+                #du = Function(VV)
+                #du.assign(uvec)
+                #du -= uvecold
+                #change = norm(du) / max(norm(uvec), 1.0e-12)
+
+                u_prev.assign(uvec)
+                #print("change:", change)
 
             print("Solving thickness evolution now...")
 

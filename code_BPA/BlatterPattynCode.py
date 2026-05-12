@@ -59,7 +59,7 @@ u_prev = Function(VV)
 u_prev_ts = Function(VV)
 
 yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(1.0e-25 * yearinsec * 1.0e18)
+A = Constant(1e-26 * yearinsec * 1.0e18)
 #alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 #tan_alpha = np.tan(alpha)
@@ -103,11 +103,8 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx) * sin(2.0*np.pi*y/Lx)))
 a_s = 0.0
 a_b = 0.0
 
-
-dts = [10]
-dt = 10
-theta_outs = [1]
-theta_out = 1
+dt = 1
+theta_out = 0
 
 zeta = Constant(0.0)
 T = 2000.0
@@ -120,6 +117,10 @@ print("=" * 80)
 
 theta = Constant(theta_out)
 num_TS = int(T / dt)
+tol = 1e-2          # momentum Picard tolerance
+tol_citer = 1e-3    # coupled u-H tolerance
+maxiter = 200
+maxiter_citer = 1
 
 # Reset initial geometry/state for this run
 zs.interpolate(0.0)
@@ -133,14 +134,12 @@ u_prev.assign(0.0)
 u1prev, u2prev = split(u_prev)
 u_prev_ts.assign(0.0)
 
-outfile = VTKFile(f"Simulations/BPA_output_dt{dt:g}_theta{theta_out:g}_tole2e3.pvd")
+#a2 = np.array([[1.0/3.0, 0.0, 0.0], [0.0, 1.0/3.0, 0.0], [0.0, 0.0, 1.0/3.0]])
+
+outfile = VTKFile(f"Simulations/BPA_output_dt{dt:g}_theta{theta_out:g}_max_citer{maxiter_citer:g}.pvd")
 
 for i in range(num_TS):
     print("Solving with n = ", n)
-    tol = 1e-2          # momentum Picard tolerance
-    tol_citer = 1e-3    # coupled u-H tolerance
-    maxiter = 200
-    maxiter_citer = 1
 
     change_u_coupled = 1.0
     change_H_coupled = 1.0
@@ -194,7 +193,7 @@ for i in range(num_TS):
             # Ignore accumulation for now.
             #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \
             #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(1) * v2 * dx \
-             #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v1.dx(0) * dx \
+            #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v1.dx(0) * dx \
             #+ theta * rhoi * g * dt * thick * (a_s - a_b) * v2.dx(1) * dx
 
             uvecold=uvec.copy(deepcopy=True)

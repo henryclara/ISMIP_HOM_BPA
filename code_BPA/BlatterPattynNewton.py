@@ -7,7 +7,6 @@ Lx = 80000.0
 Ly = 80000.0
 nz = 10
 
-#base = RectangleMesh(50, 50, Lx, Ly)
 base = PeriodicRectangleMesh(50, 50, Lx, Ly)
 
 nz = 10
@@ -40,12 +39,12 @@ VVbar = VectorFunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0, dim=2)
 W = VV * Vbar
 
 w = Function(W)
-uvec, q = split(w)
-ux, uy = split(uvec)
+#uvec, q = split(w)
+#ux, uy = split(uvec)
 
-dw = TrialFunction(W)
-vvect, r = TestFunctions(W)
-v1, v2 = split(vvect)
+#dw = TrialFunction(W)
+#vvect, r = TestFunctions(W)
+#v1, v2 = split(vvect)
 
 uvec_out = Function(VV, name="uvec")
 
@@ -57,11 +56,11 @@ u_prev = Function(VV)
 u_prev_ts = Function(VV)
 
 yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(4.6e-26 * yearinsec * 1.0e18)
+A = Constant(1.0e-25 * yearinsec * 1.0e18)
 #alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 #tan_alpha = np.tan(alpha)
-psi = np.deg2rad(0.5)
+psi = np.deg2rad(1.0)
 g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)
 rhow = 1028.0/(1.0e6*yearinsec**2)
@@ -96,8 +95,8 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx) * sin(2.0*np.pi*y/Lx)))
 a_s = 0.0
 a_b = 0.0
 
-dts = [0.1]
-theta_outs = [0]
+dts = [50]
+theta_outs = [1]
 
 zeta = Constant(0.0)
 T = 2000.0
@@ -130,7 +129,7 @@ for dt in dts:
         u_prev.assign(0.0)
         u_prev_ts.assign(0.0)
 
-        outfile = VTKFile(f"BPA_output_dt{dt:g}_theta{theta_out:g}_A4.6e-26_nx100.pvd")
+        outfile = VTKFile(f"BPA_output_dt{dt:g}_theta{theta_out:g}_A1e-25_nx100_beta1000.pvd")
 
         for i in range(num_TS):
             for j, n in enumerate(ns):
@@ -142,6 +141,24 @@ for dt in dts:
 
                 #while change>tol and iter_sim<maxiter:
                 #iter_sim=iter_sim+1
+
+                if theta_out == 0:
+                    uvec = Function(VV)
+                    uvec.interpolate(w.sub(0))   # use current mixed velocity guess if available
+
+                    ux, uy = split(uvec)
+
+                    du = TrialFunction(VV)
+                    vvect = TestFunction(VV)
+                    v1, v2 = split(vvect)
+
+                else:
+                    uvec, q = split(w)
+                    ux, uy = split(uvec)
+
+                    dw = TrialFunction(W)
+                    vvect, r = TestFunctions(W)
+                    v1, v2 = split(vvect)
 
                 mu = viscosity(ux, uy, n)
 
@@ -161,23 +178,16 @@ for dt in dts:
                 F += beta2 * dot(uvec, vvect) * ds_b
 
                 # The stabilisation terms
-                F += theta * rhoi * g * np.cos(psi) * dt * thick * (ux * zs.dx(0) + uy * zs.dx(1)) \
-                                * (v1.dx(0) + v2.dx(1)) * surf * ds_t
+                if theta_out != 0:
+                    F += theta * rhoi * g * np.cos(psi) * dt * thick * (ux * zs.dx(0) + uy * zs.dx(1)) \
+                                    * (v1.dx(0) + v2.dx(1)) * surf * ds_t
 
-                F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                                * q * (v1.dx(0) + v2.dx(1)) * dx
+                    F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
+                                    * q * (v1.dx(0) + v2.dx(1)) * dx
 
-                div_h = ux.dx(0) + uy.dx(1)
+                    div_h = ux.dx(0) + uy.dx(1)
 
-                eps_q = Constant(1.0e-8)
-
-                F += theta * r * q * dx
-                F -= theta * r * thick * div_h * dx
-                #F += theta * eps_q * r * q * dx
-
-                # This is the tricky stabilisation term (old version)
-                #F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                #                * thick * (ux.dx(0) + uy.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
+                    F += r * q * dx - r * thick * div_h * dx
 
                 F -= rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
                             - rhoi * g * np.sin(psi) * v1 * dx
@@ -191,8 +201,12 @@ for dt in dts:
                 #J = derivative(F, uvec, du)
                 #problem = NonlinearVariationalProblem(F, uvec, J=J)
 
-                J = derivative(F, w, dw)
-                problem = NonlinearVariationalProblem(F, w, J=J)
+                if theta_out == 0:
+                    J = derivative(F, uvec, du)
+                    problem = NonlinearVariationalProblem(F, uvec, J=J)
+                else:
+                    J = derivative(F, w, dw)
+                    problem = NonlinearVariationalProblem(F, w, J=J)
 
                 solver = NonlinearVariationalSolver(
                     problem,
@@ -215,7 +229,12 @@ for dt in dts:
                 )
 
                 solver.solve()
-                uvec_out.assign(w.sub(0))
+                if theta_out == 0:
+                    uvec_out.assign(uvec)
+                    w.sub(0).assign(uvec_out)
+                else:
+                    uvec_out.assign(w.sub(0))
+
                 u_prev.assign(uvec_out)
 
             print("Solving thickness evolution now...")

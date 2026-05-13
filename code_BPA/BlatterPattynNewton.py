@@ -1,3 +1,4 @@
+
 from firedrake import *
 from netgen.occ import *
 import numpy as np
@@ -36,11 +37,18 @@ uout = Function(VV3, name="uout")
 Vbar = FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
 VVbar = VectorFunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0, dim=2)
 
-W = VV * Vbar
+#W = VV * Vbar
+#w = Function(W)
 
+W = VV * VVbar * Vbar
 w = Function(W)
-#uvec, q = split(w)
-#ux, uy = split(uvec)
+
+uvec, u_s, q = split(w)
+ux, uy = split(uvec)
+ux_s, uy_s = split(u_s)
+
+vvect, eta, r = TestFunctions(W)
+v1, v2 = split(vvect)
 
 #dw = TrialFunction(W)
 #vvect, r = TestFunctions(W)
@@ -119,12 +127,13 @@ for dt in dts:
         u_init = as_vector([10.0 * (1.0 + 0.01 * sin(2.0*pi*x/Lx) * sin(2.0*pi*y/Ly)), \
                             10.0 * (0.01 * sin(2.0*pi*x/Lx) * sin(2.0*pi*y/Ly)),])
 
-        w.sub(0).interpolate(u_init)
+        w.sub(0).interpolate(u_init)   # initial guess for u
+        w.sub(1).interpolate(u_init)   # initial guess for u_s
 
         u0 = w.sub(0)
         ux0, uy0 = split(u0)
 
-        w.sub(1).project(thick * (ux0.dx(0) + uy0.dx(1)))
+        w.sub(2).project(thick * (ux0.dx(0) + uy0.dx(1)))
 
         u_prev.assign(0.0)
         u_prev_ts.assign(0.0)
@@ -153,11 +162,12 @@ for dt in dts:
                     v1, v2 = split(vvect)
 
                 else:
-                    uvec, q = split(w)
+                    uvec, u_s, q = split(w)
                     ux, uy = split(uvec)
+                    ux_s, uy_s = split(u_s)
 
                     dw = TrialFunction(W)
-                    vvect, r = TestFunctions(W)
+                    vvect, eta, r = TestFunctions(W)
                     v1, v2 = split(vvect)
 
                 mu = viscosity(ux, uy, n)
@@ -176,8 +186,27 @@ for dt in dts:
                                 + mu * uy.dx(2) * v2.dx(2) * dx
                             
                 F += beta2 * dot(uvec, vvect) * ds_b
+                
+                if theta_out != 0:
+                    
+                    # Second term...
+                    F += theta * rhoi * g * dt * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
+                    
+                    # Third term
+                    F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * q * (v1.dx(0) + v2.dx(1)) * dx
+                
+                    # Fourth term
+                    F += 0.5 * theta * g * np.cos(psi) * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * (1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * ds_t
 
-                # The stabilisation terms
+                    # Fifth term
+                    F += rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * ((v1.dx(0) + v2.dx(1)) / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * q * ds_t
+                
+                    # The constraints:
+                    F += dot(u_s - uvec, eta) * ds_t
+                    F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
+
+                # The stabilisation terms (the version where we assume that test function gradients are depth independent)
+                '''
                 if theta_out != 0:
                     F += theta * rhoi * g * np.cos(psi) * dt * thick * (ux * zs.dx(0) + uy * zs.dx(1)) \
                                     * (v1.dx(0) + v2.dx(1)) * surf * ds_t
@@ -188,6 +217,8 @@ for dt in dts:
                     div_h = ux.dx(0) + uy.dx(1)
 
                     F += r * q * dx - r * thick * div_h * dx
+
+                '''
 
                 F -= rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
                             - rhoi * g * np.sin(psi) * v1 * dx

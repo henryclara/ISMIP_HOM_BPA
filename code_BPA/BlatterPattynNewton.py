@@ -199,7 +199,7 @@ for dt in dts:
                     F += 0.5 * theta * g * np.cos(psi) * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * (1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * ds_t
 
                     # Fifth term
-                    F += rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * ((v1.dx(0) + v2.dx(1)) / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * q * ds_t
+                    F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * ((v1.dx(0) + v2.dx(1)) / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * q * ds_t
                 
                     # The constraints:
                     F += dot(u_s - uvec, eta) * ds_t

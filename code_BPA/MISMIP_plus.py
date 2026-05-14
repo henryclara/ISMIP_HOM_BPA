@@ -68,7 +68,7 @@ A = Constant(1.0e-25 * yearinsec * 1.0e18)
 #alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 #tan_alpha = np.tan(alpha)
-psi = np.deg2rad(1.0)
+psi = np.deg2rad(0.0)
 g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)
 rhow = 1028.0/(1.0e6*yearinsec**2)
@@ -127,7 +127,7 @@ a_s = 0.0
 a_b = 0.0
 
 dts = [1]
-theta_outs = [0]
+theta_outs = [1]
 
 zeta = Constant(0.0)
 T = 2000.0

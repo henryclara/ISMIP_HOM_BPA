@@ -73,10 +73,33 @@ g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)
 rhow = 1028.0/(1.0e6*yearinsec**2)
 
-zs = Function(Vbar, name="zs").interpolate(0.0)
-zb = Function(Vbar, name="zb").interpolate(zs - 1000.0 \
-             + 500.0 * sin(omega * x) * sin(omega * y))
 
+xbar = Constant(300000.0)
+B0 = Constant(-150.0)
+B2 = Constant(-728.8)
+B4 = Constant(343.91)
+B6 = Constant(-50.57)
+
+wc = Constant(24000.0)
+fc = Constant(4000.0)
+dc = Constant(500.0)
+zdeep = Constant(-720.0)
+
+def mismip_bed(x, y):
+    yc = y - Ly / 2.0
+    X = x / xbar
+
+    Bx = B0 + B2 * X**2 + B4 * X**4 + B6 * X**6
+
+    By = dc * (
+        1.0 / (1.0 + exp(-2.0 * (yc - wc) / fc))
+        + 1.0 / (1.0 + exp( 2.0 * (yc + wc) / fc))
+    )
+
+    return max_value(Bx + By, zdeep)
+
+zb = Function(Vbar, name="zb").interpolate(mismip_bed(x, y))
+zs = Function(Vbar, name="zs").interpolate(1000.0)
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
@@ -98,13 +121,13 @@ ns = [3] #np.linspace(1, 3, 11)
 
 # Basal friction field
 beta2 = Function(Vbar, name="beta2")
-beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx) * sin(2.0*np.pi*y/Lx)))
+beta2.interpolate(Constant(1.0e4))
 
 a_s = 0.0
 a_b = 0.0
 
-dts = [50]
-theta_outs = [1]
+dts = [1]
+theta_outs = [0]
 
 zeta = Constant(0.0)
 T = 2000.0
@@ -149,9 +172,10 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        zs.interpolate(0.0)
-        zb.interpolate(zs - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
-        thick.interpolate(zs - zb)
+        #zs.interpolate(0.0)
+        #zb.interpolate(zs - 1000.0 + 500.0 * sin(omega * x) * sin(omega * y))
+        #thick.interpolate(zs - zb)
+                
         mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
 
         u_init = as_vector([10.0 * (1.0 + 0.01 * sin(2.0*pi*x/Lx) * sin(2.0*pi*y/Ly)), \
@@ -250,8 +274,8 @@ for dt in dts:
 
                 '''
 
-                F += rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
-                            + rhoi * g * np.sin(psi) * v1 * dx
+                F += rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx #\
+                            #+ rhoi * g * np.sin(psi) * v1 * dx
                     
                     # Ignore accumulation for now.
                     #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \
@@ -323,13 +347,14 @@ for dt in dts:
             solve(lhs(F) == rhs(F), H)
             thick.assign(H)
             thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
+            zs.interpolate(zb + thick)
             mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
             print("Finished solving thickness evolution...")
             print("Year: ", (i+1)*dt)
 
             t = (i + 1) * dt
 
-            if abs(t % 50.0) < 1.0e-10 or abs((t % 50.0) - 50.0) < 1.0e-10:
+            if abs(t % 1.0) < 1.0e-10 or abs((t % 1.0) - 1.0) < 1.0e-10:
                 #uout.interpolate(as_vector([ux, uy, 0.0]))
                 ux_out, uy_out = split(uvec_out)
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))

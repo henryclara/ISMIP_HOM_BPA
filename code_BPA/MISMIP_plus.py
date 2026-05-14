@@ -98,9 +98,11 @@ def mismip_bed(x, y):
 
     return max_value(Bx + By, zdeep)
 
-zb = Function(Vbar, name="zb").interpolate(mismip_bed(x, y))
-zs = Function(Vbar, name="zs").interpolate(1000.0)
-thick = Function(Vbar, name="thick").interpolate(zs - zb)
+
+bed = Function(Vbar, name="bed").interpolate(mismip_bed(x, y))
+zb = Function(Vbar, name="zb").interpolate(max_value(-90.0, bed))
+thick = Function(Vbar, name="thick").interpolate(100.0)
+zs = Function(Vbar, name="zs").interpolate(zb + thick)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
 eps = Constant(1e-6) # Constant(1e-10)
@@ -123,19 +125,18 @@ ns = [3] #np.linspace(1, 3, 11)
 beta2 = Function(Vbar, name="beta2")
 beta2.interpolate(Constant(1.0e4))
 
-a_s = 0.0
-a_b = 0.0
+a_s = Constant(0.3)
+a_b = Constant(0.0)
 
-dts = [1]
-theta_outs = [1]
-
+dts = [5]
+theta_outs = [0]
 zeta = Constant(0.0)
 T = 2000.0
 
 # For theta_out == 0
 bcs_u = [
     DirichletBC(VV.sub(0), 0.0, 1),  # ux = 0 on x-left
-    DirichletBC(VV.sub(0), 0.0, 2),  # ux = 0 on x-right
+    #DirichletBC(VV.sub(0), 0.0, 2),  # ux = 0 on x-right
     DirichletBC(VV.sub(1), 0.0, 3),  # uy = 0 on y-lower side
     DirichletBC(VV.sub(1), 0.0, 4),  # uy = 0 on y-upper side
 ]
@@ -144,20 +145,20 @@ bcs_u = [
 bcs_w = [
     # uvec side impenetrability
     DirichletBC(W.sub(0).sub(0), 0.0, 1),  # ux = 0 on x-left
-    DirichletBC(W.sub(0).sub(0), 0.0, 2),  # ux = 0 on x-right
+    #DirichletBC(W.sub(0).sub(0), 0.0, 2),  # ux = 0 on x-right
     DirichletBC(W.sub(0).sub(1), 0.0, 3),  # uy = 0 on y-lower
     DirichletBC(W.sub(0).sub(1), 0.0, 4),  # uy = 0 on y-upper
 
     # u_s side impenetrability
     DirichletBC(W.sub(1).sub(0), 0.0, 1),
-    DirichletBC(W.sub(1).sub(0), 0.0, 2),
+    #DirichletBC(W.sub(1).sub(0), 0.0, 2),
     DirichletBC(W.sub(1).sub(1), 0.0, 3),
     DirichletBC(W.sub(1).sub(1), 0.0, 4),
 ]
 
 bcs_ubar = [
     DirichletBC(VVbar.sub(0), 0.0, 1),
-    DirichletBC(VVbar.sub(0), 0.0, 2),
+    #DirichletBC(VVbar.sub(0), 0.0, 2),
     DirichletBC(VVbar.sub(1), 0.0, 3),
     DirichletBC(VVbar.sub(1), 0.0, 4),
 ]
@@ -247,13 +248,13 @@ for dt in dts:
                     F += theta * rhoi * g * dt * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
                     
                     # Third term
-                    F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * q * (v1.dx(0) + v2.dx(1)) * dx
+                    F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * q * (v1.dx(0) + v2.dx(1)) * dx
                 
                     # Fourth term
-                    F += 0.5 * theta * g * np.cos(psi) * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * (1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * ds_t
+                    F += 0.5 * theta * g * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * (1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * ds_t
 
                     # Fifth term
-                    F += theta * rhoi * g * np.cos(psi) * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * ((v1.dx(0) + v2.dx(1)) / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * q * ds_t
+                    F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * ((v1.dx(0) + v2.dx(1)) / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * q * ds_t
                 
                     # The constraints:
                     F += dot(u_s - uvec, eta) * ds_t
@@ -274,9 +275,18 @@ for dt in dts:
 
                 '''
 
-                F += rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx #\
+                F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx #\
                             #+ rhoi * g * np.sin(psi) * v1 * dx
-                    
+
+                z = SpatialCoordinate(mesh)[2]
+                sea_level = Constant(0.0)
+
+                p_ocean = rhow * g * max_value(sea_level - z, 0.0)
+
+                #F += p_ocean * v1 * ds_v(2)
+
+                #F -= rhoi * g  * zs * ds_v(2)
+
                     # Ignore accumulation for now.
                     #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \
                     #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(1) * v2 * dx \
@@ -321,6 +331,9 @@ for dt in dts:
                     uvec_out.assign(w.sub(0))
 
                 u_prev.assign(uvec_out)
+                #ux_out, uy_out = split(uvec_out)
+                #uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
+                #outfile.write(uout, zs, zb, thick)
 
             print("Solving thickness evolution now...")
 
@@ -340,6 +353,7 @@ for dt in dts:
                 - thick * phi * dx \
                 + dt * (ux_bar * thick_new).dx(0) * phi * dx
                 + dt * (uy_bar * thick_new).dx(1) * phi * dx
+                - dt * (a_s - a_b) * phi * dx
                 # Artifical viscosity
                 + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
             )
@@ -347,7 +361,11 @@ for dt in dts:
             solve(lhs(F) == rhs(F), H)
             thick.assign(H)
             thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
+
+            zb_float = -rhoi / rhow * thick
+            zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
+            
             mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
             print("Finished solving thickness evolution...")
             print("Year: ", (i+1)*dt)

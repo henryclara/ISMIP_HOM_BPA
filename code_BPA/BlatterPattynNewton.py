@@ -220,8 +220,8 @@ for dt in dts:
 
                 '''
 
-                F -= rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
-                            - rhoi * g * np.sin(psi) * v1 * dx
+                F += rhoi * g * np.cos(psi) * zs * (v1.dx(0) + v2.dx(1)) * dx \
+                            + rhoi * g * np.sin(psi) * v1 * dx
                     
                     # Ignore accumulation for now.
                     #- theta * rhoi * g * dt * (a_s - a_b) * zb.dx(0) * v1 * dx \

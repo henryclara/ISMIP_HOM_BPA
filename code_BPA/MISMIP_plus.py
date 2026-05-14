@@ -6,7 +6,7 @@ import time
 
 Lx = 640000.0
 Ly = 80000.0
-nx = 80
+nx = 160
 ny = 20
 nz = 10
 
@@ -128,8 +128,8 @@ beta2.interpolate(Constant(1.0e4))
 a_s = Constant(0.3)
 a_b = Constant(0.0)
 
-dts = [5]
-theta_outs = [0]
+dts = [1]
+theta_outs = [1]
 zeta = Constant(0.0)
 T = 2000.0
 
@@ -240,7 +240,11 @@ for dt in dts:
                                 + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
                                 + mu * uy.dx(2) * v2.dx(2) * dx
                             
-                F += beta2 * dot(uvec, vvect) * ds_b
+                #F += beta2 * dot(uvec, vvect) * ds_b
+
+                delta_zb = Constant(1.0)
+                grounded = 0.5 * (1.0 - tanh((zb - bed) / delta_zb))
+                F += grounded * beta2 * dot(uvec, vvect) * ds_b
                 
                 if theta_out != 0:
                     
@@ -365,15 +369,17 @@ for dt in dts:
             zb_float = -rhoi / rhow * thick
             zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
-            
+
             mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
             print("Finished solving thickness evolution...")
             print("Year: ", (i+1)*dt)
 
             t = (i + 1) * dt
 
-            if abs(t % 1.0) < 1.0e-10 or abs((t % 1.0) - 1.0) < 1.0e-10:
+            if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
                 #uout.interpolate(as_vector([ux, uy, 0.0]))
                 ux_out, uy_out = split(uvec_out)
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
-                outfile.write(uout, thick, time=t)
+                grounded_out = Function(Vbar, name="grounded")
+                grounded_out.interpolate(grounded)
+                outfile.write(uout, thick, zs, zb, grounded_out, time=t)

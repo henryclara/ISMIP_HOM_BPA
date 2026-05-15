@@ -95,7 +95,6 @@ def mismip_bed(x, y):
     return max_value(Bx + By, zdeep)
 
 zb = Function(Vbar, name="zb").interpolate(mismip_bed(x, y))
-
 thick = Function(Vbar, name="thick").interpolate(1000.0)
 zs = Function(Vbar, name="zs").interpolate(zb + thick)
 

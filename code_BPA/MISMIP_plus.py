@@ -112,9 +112,9 @@ beta2.interpolate(Constant(1.0e4))
 a_s = Constant(0.3)
 a_b = Constant(0.0)
 
-dts = [5]
+dts = [1, 5, 10]
 theta_outs = [1, 0]
-FSSA_keywords = [None, "full", "approx"]
+FSSA_keywords = ["approx", "full", None]
 T = 2000.0
 
 # For theta_out == 0
@@ -168,7 +168,7 @@ for dt in dts:
 
             u_prev.assign(0.0)
 
-            outfile = VTKFile(f"Simulations/MISMIP_output_test1_theta{theta_out:g}_dt{dt:g}.pvd")
+            outfile = VTKFile(f"Simulations/MISMIP_output_{FSSA_keyword}_theta{theta_out:g}_dt{dt:g}.pvd")
 
             for i in range(num_TS):
                 for j, n in enumerate(ns):
@@ -240,22 +240,13 @@ for dt in dts:
                         n_z = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
                         F -= theta * a_s * n_z * rhoi * g * dt * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t
                         F -= theta * rhoi * g * dt * a_s * (v1.dx(0) + v2.dx(1)) * dx
-                        
-                        #F += theta * rhoi * g * dt * thick * (ux * zs.dx(0) + uy * zs.dx(1)) \
-                        #                * (v1.dx(0) + v2.dx(1)) * surf * ds_t
-
-                        #F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                        #                * q * (v1.dx(0) + v2.dx(1)) * dx
-
-                        #div_h = ux.dx(0) + uy.dx(1)
-
-                        #F += r * q * dx - r * thick * div_h * dx
 
                     z = SpatialCoordinate(mesh)[2]
                     sea_level = Constant(0.0)
 
                     p_ocean = rhow * g * max_value(sea_level - z, 0.0)
 
+                    # To do: Get the ocean pressure properly set up. The current version is close, but not strictly accurate
                     #F += p_ocean * v1 * ds_v(2)
 
                     if theta == 0:
@@ -331,7 +322,7 @@ for dt in dts:
 
                 t = (i + 1) * dt
 
-                if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
+                if abs(t % 50) < 1.0e-10 or abs((t % 50) - 50) < 1.0e-10:
                     ux_out, uy_out = split(uvec_out)
                     uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
                     grounded_out = Function(Vbar, name="grounded")

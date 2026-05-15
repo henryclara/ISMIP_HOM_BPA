@@ -1,6 +1,5 @@
 
 from firedrake import *
-from netgen.occ import *
 import numpy as np
 import time
 
@@ -37,9 +36,6 @@ uout = Function(VV3, name="uout")
 Vbar = FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
 VVbar = VectorFunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0, dim=2)
 
-#W = VV * Vbar
-#w = Function(W)
-
 W = VV * VVbar * Vbar
 w = Function(W)
 
@@ -49,10 +45,6 @@ ux_s, uy_s = split(u_s)
 
 vvect, eta, r = TestFunctions(W)
 v1, v2 = split(vvect)
-
-#dw = TrialFunction(W)
-#vvect, r = TestFunctions(W)
-#v1, v2 = split(vvect)
 
 uvec_out = Function(VV, name="uvec")
 
@@ -73,7 +65,6 @@ g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)
 rhow = 1028.0/(1.0e6*yearinsec**2)
 
-
 xbar = Constant(300000.0)
 B0 = Constant(-150.0)
 B2 = Constant(-728.8)
@@ -90,11 +81,8 @@ def mismip_bed(x, y):
     X = x / xbar
 
     Bx = B0 + B2 * X**2 + B4 * X**4 + B6 * X**6
-
-    By = dc * (
-        1.0 / (1.0 + exp(-2.0 * (yc - wc) / fc))
-        + 1.0 / (1.0 + exp( 2.0 * (yc + wc) / fc))
-    )
+    By = dc * (1.0 / (1.0 + exp(-2.0 * (yc - wc) / fc))
+        + 1.0 / (1.0 + exp( 2.0 * (yc + wc) / fc)))
 
     return max_value(Bx + By, zdeep)
 
@@ -105,7 +93,7 @@ thick = Function(Vbar, name="thick").interpolate(100.0)
 zs = Function(Vbar, name="zs").interpolate(zb + thick)
 
 mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
-eps = Constant(1e-6) # Constant(1e-10)
+eps = Constant(1e-6)
 
 def viscosity(ux, uy, n=1):
     '''
@@ -119,7 +107,7 @@ def viscosity(ux, uy, n=1):
     return mu
 
 mu = 1
-ns = [3] #np.linspace(1, 3, 11)
+ns = [3]
 
 # Basal friction field
 beta2 = Function(Vbar, name="beta2")
@@ -128,9 +116,8 @@ beta2.interpolate(Constant(1.0e4))
 a_s = Constant(0.3)
 a_b = Constant(0.0)
 
-dts = [1]
-theta_outs = [1]
-zeta = Constant(0.0)
+dts = [5]
+theta_outs = [1, 0]
 T = 2000.0
 
 # For theta_out == 0
@@ -193,20 +180,20 @@ for dt in dts:
         u_prev.assign(0.0)
         u_prev_ts.assign(0.0)
 
-        outfile = VTKFile(f"Simulations/MISMIP_output_test1.pvd")
+        outfile = VTKFile(f"Simulations/MISMIP_output_test1_theta{theta_out:g}_dt{dt:g}.pvd")
 
         for i in range(num_TS):
+
+            #if i > 10:
+            #    theta = Constant(1)
+
             for j, n in enumerate(ns):
                 print("Solving with n = ", n)
-                change=100
                 tol=1e-3
                 maxiter=200
                 iter_sim=0
 
-                #while change>tol and iter_sim<maxiter:
-                #iter_sim=iter_sim+1
-
-                if theta_out == 0:
+                if theta == 0:
                     uvec = Function(VV)
                     uvec.interpolate(w.sub(0))   # use current mixed velocity guess if available
 
@@ -243,10 +230,13 @@ for dt in dts:
                 #F += beta2 * dot(uvec, vvect) * ds_b
 
                 delta_zb = Constant(1.0)
-                grounded = 0.5 * (1.0 - tanh((zb - bed) / delta_zb))
+                grounded = 1.0 - tanh((zb - bed) / delta_zb)
+                zeta = Constant(1.0) - grounded
+
+
                 F += grounded * beta2 * dot(uvec, vvect) * ds_b
                 
-                if theta_out != 0:
+                if theta != 0:
                     
                     # Second term...
                     F += theta * rhoi * g * dt * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
@@ -255,7 +245,7 @@ for dt in dts:
                     F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * q * (v1.dx(0) + v2.dx(1)) * dx
                 
                     # Fourth term
-                    F += 0.5 * theta * g * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * (1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * ds_t
+                    F += 0.5 * theta * rhoi * g * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * (1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * ds_t
 
                     # Fifth term
                     F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * ((v1.dx(0) + v2.dx(1)) / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)) * q * ds_t
@@ -263,6 +253,12 @@ for dt in dts:
                     # The constraints:
                     F += dot(u_s - uvec, eta) * ds_t
                     F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
+
+                    # The accumulation terms:
+                    n_z = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
+
+                    F -= theta * a_s * n_z * rhoi * g * dt * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t
+                    F -= theta * rhoi * g * dt * a_s * (v1.dx(0) + v2.dx(1)) * dx
 
                 # The stabilisation terms (the version where we assume that test function gradients are depth independent)
                 '''
@@ -300,7 +296,7 @@ for dt in dts:
                 #J = derivative(F, uvec, du)
                 #problem = NonlinearVariationalProblem(F, uvec, J=J)
 
-                if theta_out == 0:
+                if theta == 0:
                     J = derivative(F, uvec, du)
                     problem = NonlinearVariationalProblem(F, uvec, bcs=bcs_u, J=J)
                 else:
@@ -328,7 +324,7 @@ for dt in dts:
                 )
 
                 solver.solve()
-                if theta_out == 0:
+                if theta == 0:
                     uvec_out.assign(uvec)
                     w.sub(0).assign(uvec_out)
                 else:

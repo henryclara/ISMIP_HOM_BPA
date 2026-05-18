@@ -1,193 +1,13 @@
 from firedrake import *
 import numpy as np
 import time
-
-Lx = 640000.0
-Ly_full = 80000.0
-Ly = Ly_full / 2.0
-
-nx = 640
-ny = 40
-nz = 10
-
-base = RectangleMesh(nx, ny, Lx, Ly)
-base.coordinates.dat.data[:, 1] += Ly_full / 2.0
-mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
-x, y, sigma = SpatialCoordinate(mesh)
-
-Xref = Function(mesh.coordinates.function_space(), name="Xref")
-Xref.interpolate(SpatialCoordinate(mesh))
-xref, yref, sigmaref = split(Xref)
-
-# Horizontal and vertical elements
-horiz = FiniteElement("CG", triangle, 1)
-vert  = FiniteElement("CG", interval, 1)
-
-# Scalar tensor-product element: CG1 (horizontal) x CG1 (vertical)
-scalar_elt = TensorProductElement(horiz, vert)
-V = FunctionSpace(mesh, scalar_elt)
-
-vector_elt = VectorElement(scalar_elt, dim=2)
-VV = FunctionSpace(mesh, vector_elt)
-
-# Vector-valued version of the same tensor-product space
-vector3_elt = VectorElement(scalar_elt, dim=3)
-VV3 = FunctionSpace(mesh, vector3_elt)
-uout = Function(VV3, name="uout")
-
-Vbar = FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
-VVbar = VectorFunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0, dim=2)
-
-W = VV * VVbar * Vbar
-w = Function(W)
-
-uvec, u_s, q = split(w)
-ux, uy = split(uvec)
-ux_s, uy_s = split(u_s)
-
-vvect, eta, r = TestFunctions(W)
-v1, v2 = split(vvect)
-
-uvec_out = Function(VV, name="uvec")
-
-phi = TestFunction(Vbar)
-thick_new = TrialFunction(Vbar)
-H = Function(Vbar)
-
-u_prev = Function(VV)
-#u_prev_ts = Function(VV)
-
-yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(1.0e-25 * yearinsec * 1.0e18)
-#omega = 2.0*np.pi / Lx
-g = 9.8*yearinsec**2
-rhoi = 917.0/(1.0e6*yearinsec**2)
-rhow = 1028.0/(1.0e6*yearinsec**2)
-
-xbar = Constant(300000.0)
-B0 = Constant(-150.0)
-B2 = Constant(-728.8)
-B4 = Constant(343.91)
-B6 = Constant(-50.57)
-
-wc = Constant(24000.0)
-fc = Constant(4000.0)
-dc = Constant(500.0)
-zdeep = Constant(-720.0)
-
-def mismip_bed(x, y):
-    yc = y - Ly_full / 2.0
-    X = x / xbar
-
-    Bx = B0 + B2 * X**2 + B4 * X**4 + B6 * X**6
-    By = dc * (1.0 / (1.0 + exp(-2.0 * (yc - wc) / fc))
-        + 1.0 / (1.0 + exp( 2.0 * (yc + wc) / fc)))
-
-    return max_value(Bx + By, zdeep)
-
-
-bed = Function(Vbar, name="bed").interpolate(mismip_bed(x, y))
-zb = Function(Vbar, name="zb").interpolate(max_value(-90.0, bed))
-thick = Function(Vbar, name="thick").interpolate(100.0)
-zs = Function(Vbar, name="zs").interpolate(zb + thick)
-
-mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
-eps = Constant(1e-6)
-
-def viscosity(ux, uy, n=1):
-    '''
-    Double check this against the derivation
-    '''
-    eps_e2 = (ux.dx(0)**2 + uy.dx(1)**2 + ux.dx(0) * uy.dx(1) \
-              + 0.25 * (ux.dx(1) + uy.dx(0))**2 + 0.25 * ux.dx(2)**2 \
-              + 0.25 * uy.dx(2)**2)
-
-    mu = 0.5 * A**(-1.0 / n) * (eps_e2 + eps**2)**((1.0 - n) / (2.0 * n))
-    return mu
-
-#mu = 1
-ns = [3]
-
-# Basal friction field
-beta2 = Function(Vbar, name="beta2")
-beta2.interpolate(Constant(1.0e4))
-
-a_s = Constant(0.3)
-a_b = Constant(0.0)
-
-dts = [0.5]
-theta_outs = [0]
-FSSA_keyword = "full"
-T = 10000.0
-
-# For theta_out == 0
-bcs_u = [
-    DirichletBC(VV.sub(0), 0.0, 1),
-    DirichletBC(VV.sub(1), 0.0, 3),
-    DirichletBC(VV.sub(1), 0.0, 4),
-]
-
-# For theta_out != 0
-bcs_w = [
-    # uvec side impenetrability
-    DirichletBC(W.sub(0).sub(0), 0.0, 1),
-    DirichletBC(W.sub(0).sub(1), 0.0, 3),
-    DirichletBC(W.sub(0).sub(1), 0.0, 4),
-
-    # u_s side impenetrability
-    DirichletBC(W.sub(1).sub(0), 0.0, 1),
-    DirichletBC(W.sub(1).sub(1), 0.0, 3),
-    DirichletBC(W.sub(1).sub(1), 0.0, 4),
-]
-
-bcs_ubar = [
-    DirichletBC(VVbar.sub(0), 0.0, 1),
-    DirichletBC(VVbar.sub(1), 0.0, 3),
-    DirichletBC(VVbar.sub(1), 0.0, 4),
-]
-
-delta_zb = Constant(1.0)
-grounded_out = Function(Vbar, name="grounded")
-
-def reset_state():
-    # Reset geometry
-    zb.interpolate(max_value(-90.0, bed))
-    thick.interpolate(100.0)
-    zs.interpolate(zb + thick)
-
-    mesh.coordinates.interpolate(
-        as_vector([xref, yref, zb + sigmaref * thick])
-    )
-
-    # Reset solution fields
-    w.assign(0.0)
-    uvec_out.assign(0.0)
-    H.assign(0.0)
-    u_prev.assign(0.0)
-
-    # Reset velocity guess
-    u_init = as_vector([
-        10.0 * (1.0 + 0.01 * sin(2.0 * pi * x / Lx) * sin(2.0 * pi * y / Ly_full)),
-        10.0 * (0.01 * sin(2.0 * pi * x / Lx) * sin(2.0 * pi * y / Ly_full)),
-    ])
-
-    w.sub(0).interpolate(u_init)
-    w.sub(1).interpolate(u_init)
-
-    u0 = w.sub(0)
-    ux0, uy0 = split(u0)
-    w.sub(2).project(thick * (ux0.dx(0) + uy0.dx(1)))
-
-def save_restart(filename, t, step, dt, theta_out):
-    with CheckpointFile(filename, "w") as afile:
-        afile.save_mesh(mesh)
-        afile.save_function(thick, name="thick")
-        afile.save_function(zb, name="zb")
-        afile.save_function(zs, name="zs")
-        afile.save_function(w, name="w")
-        afile.save_function(uvec_out, name="uvec_out")
-
-    np.savez(filename.replace(".h5", "_meta.npz"), t=t, step=step, dt=dt, theta_out=theta_out)
+from config import *
+from mesh import *
+from physics import *
+from geometry import *
+from spaces import *
+from bcs import *
+from io import *
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -321,9 +141,7 @@ for dt in dts:
             print("Solving thickness evolution now...")
 
             ubar = Function(VVbar, name="u_bar")
-
             ubar.project(uvec_out, bcs=bcs_ubar)
-
             ux_bar, uy_bar = split(ubar)
 
             vel = as_vector([ux_bar, uy_bar])

@@ -67,11 +67,9 @@ for dt in dts:
                 F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
                 
                 if theta_out != 0 and FSSA_keyword == "full":
-
-
                     F += theta * rhoi * g * dt * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
                     F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * q * (v1.dx(0) + v2.dx(1)) * dx
-                    F += 0.5 * theta * rhoi * g * dt * (ux_s * (zs * zs).dx(0) + uy_s * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * surf * ds_t
+                    F += 0.5 * theta * rhoi * g * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * surf * ds_t
                     F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * (v1.dx(0) + v2.dx(1)) * surf * q * ds_t
                 
                     # The constraints:

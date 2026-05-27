@@ -1,4 +1,5 @@
 from firedrake import *
+import numpy as np
 
 Lx = 640000.0
 Ly_full = 80000.0
@@ -35,7 +36,3 @@ a_s = Constant(0.3)
 a_b = Constant(0.0)
 
 ns = [3]
-
-# Basal friction field
-beta2 = Function(Vbar, name="beta2")
-beta2.interpolate(Constant(1.0e4))

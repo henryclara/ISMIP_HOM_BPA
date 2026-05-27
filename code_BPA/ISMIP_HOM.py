@@ -3,6 +3,7 @@ import numpy as np
 import time
 from config import *
 from mesh import *
+from fields import *
 from physics import *
 from geometry import *
 from spaces import *

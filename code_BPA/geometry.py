@@ -1,12 +1,8 @@
 from firedrake import *
+import numpy as np
 
-bed = Function(Vbar, name="bed").interpolate(mismip_bed(x, y))
-zb = Function(Vbar, name="zb").interpolate(max_value(-90.0, bed))
-thick = Function(Vbar, name="thick").interpolate(100.0)
-zs = Function(Vbar, name="zs").interpolate(zb + thick)
+from config import *
 
-delta_zb = Constant(1.0)
-grounded_out = Function(Vbar, name="grounded")
 
 def mismip_bed(x, y):
     yc = y - Ly_full / 2.0
@@ -19,22 +15,23 @@ def mismip_bed(x, y):
     return max_value(Bx + By, zdeep)
 
 def reset_state():
-    # Reset geometry
+    from domain import x, y
+    from fields import bed, zb, thick, zs
+    from spaces import mesh3D, xref, yref, sigmaref, w, uvec_out, H, u_prev
+
     zb.interpolate(max_value(-90.0, bed))
     thick.interpolate(100.0)
     zs.interpolate(zb + thick)
 
-    mesh.coordinates.interpolate(
+    mesh3D.coordinates.interpolate(
         as_vector([xref, yref, zb + sigmaref * thick])
     )
 
-    # Reset solution fields
     w.assign(0.0)
     uvec_out.assign(0.0)
     H.assign(0.0)
     u_prev.assign(0.0)
 
-    # Reset velocity guess
     u_init = as_vector([
         10.0 * (1.0 + 0.01 * sin(2.0 * pi * x / Lx) * sin(2.0 * pi * y / Ly_full)),
         10.0 * (0.01 * sin(2.0 * pi * x / Lx) * sin(2.0 * pi * y / Ly_full)),

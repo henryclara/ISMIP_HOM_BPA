@@ -1,5 +1,7 @@
 from firedrake import *
-
+import numpy as np
+from config import *
+from domain import *
 # -----------------------------
 # Elements
 # -----------------------------
@@ -18,14 +20,14 @@ vector3_elt = VectorElement(scalar_elt, dim=3)
 # Function spaces
 # -----------------------------
 
-V = FunctionSpace(mesh, scalar_elt)
-VV = FunctionSpace(mesh, vector_elt)
+V = FunctionSpace(mesh3D, scalar_elt)
+VV = FunctionSpace(mesh3D, vector_elt)
 
-VV3 = FunctionSpace(mesh, vector3_elt)
+VV3 = FunctionSpace(mesh3D, vector3_elt)
 uout = Function(VV3, name="uout")
 
-Vbar = FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
-VVbar = VectorFunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0, dim=2)
+Vbar = FunctionSpace(mesh3D, "CG", 1, vfamily="R", vdegree=0)
+VVbar = VectorFunctionSpace(mesh3D, "CG", 1, vfamily="R", vdegree=0, dim=2)
 
 H = Function(Vbar)
 u_prev = Function(VV)

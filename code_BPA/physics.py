@@ -1,4 +1,9 @@
 from firedrake import *
+import numpy as np
+
+from config import *
+from domain import *
+from spaces import *
 
 def viscosity(ux, uy, n=1):
     '''

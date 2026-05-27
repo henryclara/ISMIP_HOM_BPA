@@ -1,8 +1,8 @@
 from firedrake import *
 import numpy as np
-import time
 from config import *
-from mesh import *
+from domain import *
+from fields import *
 from physics import *
 from geometry import *
 from spaces import *
@@ -96,7 +96,7 @@ for dt in dts:
                     F -= theta * a_s * n_z * rhoi * g * dt * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t
                     F -= theta * rhoi * g * dt * a_s * (v1.dx(0) + v2.dx(1)) * dx
 
-                z = SpatialCoordinate(mesh)[2]
+                z = SpatialCoordinate(mesh3D)[2]
                 sea_level = Constant(0.0)
 
                 p_ocean = rhow * g * max_value(sea_level - z, 0.0)
@@ -148,7 +148,7 @@ for dt in dts:
 
             vel = as_vector([ux_bar, uy_bar])
             vnorm = sqrt(dot(vel, vel) + 1e-10)
-            h = CellDiameter(mesh)
+            h = CellDiameter(mesh3D)
             mu_art = 0.1 * h * vnorm
 
             F = (
@@ -169,7 +169,7 @@ for dt in dts:
             zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
 
-            mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
+            mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
             print("Finished solving thickness evolution...")
             print("Year: ", (i+1)*dt)
 

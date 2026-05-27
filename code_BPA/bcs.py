@@ -1,4 +1,7 @@
 from firedrake import *
+import numpy as np
+
+from spaces import *
 
 # For theta_out == 0
 bcs_u = [

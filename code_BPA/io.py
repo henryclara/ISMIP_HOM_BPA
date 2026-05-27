@@ -1,3 +1,6 @@
+from firedrake import *
+import numpy as np
+
 def save_restart(filename, t, step, dt, theta_out):
     with CheckpointFile(filename, "w") as afile:
         afile.save_mesh(mesh)

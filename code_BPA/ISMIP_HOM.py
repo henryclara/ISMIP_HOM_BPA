@@ -1,3 +1,4 @@
+import os
 from firedrake import *
 import numpy as np
 import time
@@ -8,7 +9,7 @@ from physics import *
 from geometry import *
 from spaces import *
 from bcs import *
-from io import *
+from io_local import *
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -22,7 +23,10 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
+        outfile_path = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd"
+        os.makedirs(os.path.dirname(outfile_path), exist_ok=True)
+        os.makedirs(os.path.splitext(outfile_path)[0], exist_ok=True)
+        outfile = VTKFile(outfile_path)
 
         for i in range(num_TS):
             for j, n in enumerate(ns):

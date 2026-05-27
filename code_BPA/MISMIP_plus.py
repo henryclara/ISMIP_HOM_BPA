@@ -1,3 +1,4 @@
+import os
 from firedrake import *
 import numpy as np
 from config import *
@@ -7,7 +8,7 @@ from physics import *
 from geometry import *
 from spaces import *
 from bcs import *
-from io import *
+from io_local import *
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -21,7 +22,10 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
+        outfile_path = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd"
+        os.makedirs(os.path.dirname(outfile_path), exist_ok=True)
+        os.makedirs(os.path.splitext(outfile_path)[0], exist_ok=True)
+        outfile = VTKFile(outfile_path)
 
         for i in range(num_TS):
             for j, n in enumerate(ns):
@@ -58,11 +62,17 @@ for dt in dts:
                                 + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
                                 + mu * uy.dx(2) * v2.dx(2) * dx
 
-                #delta_zb = Constant(1.0)
                 grounded = 1.0 - tanh((zb - bed) / delta_zb)
                 zeta = Constant(1.0) - grounded
 
-                F += grounded * beta2 * dot(uvec, vvect) * ds_b
+                n = FacetNormal(mesh3D)
+                F += grounded * beta2 * dot(uvec, vvect) * ds_b - grounded * beta2 * (ux * n[0] + uy * n[1]) * dot(as_vector((n[0], n[1])), vvect) * ds_b
+
+                # Set up the ocean pressure.
+                p_o = po = conditional(sigma < 0.0, -rhow * g * sigma, 0.0)
+
+                F += rhoi * g * (zs - sigma) * (v1.dx(0) + v2.dx(1)) * ds_v(2) - p_o * dot(as_vector((n[0], n[1])), vvect) * ds_v(2)
+                #F += zeta * p_o * dot(as_vector((n[0], n[1])), vvect) * ds_b
 
                 F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
                 

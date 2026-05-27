@@ -39,7 +39,8 @@ def reset_state():
 
     w.sub(0).interpolate(u_init)
     w.sub(1).interpolate(u_init)
+    w.sub(2).interpolate(u_init)
 
     u0 = w.sub(0)
     ux0, uy0 = split(u0)
-    w.sub(2).project(thick * (ux0.dx(0) + uy0.dx(1)))
+    w.sub(3).project(thick * (ux0.dx(0) + uy0.dx(1)))

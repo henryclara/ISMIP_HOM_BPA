@@ -1,4 +1,3 @@
-import os
 from firedrake import *
 import numpy as np
 from config import *
@@ -22,10 +21,7 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        outfile_path = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd"
-        os.makedirs(os.path.dirname(outfile_path), exist_ok=True)
-        os.makedirs(os.path.splitext(outfile_path)[0], exist_ok=True)
-        outfile = VTKFile(outfile_path)
+        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
 
         for i in range(num_TS):
             for j, n in enumerate(ns):
@@ -42,12 +38,13 @@ for dt in dts:
                     v1, v2 = split(vvect)
 
                 else:
-                    uvec, u_s, q = split(w)
+                    uvec, u_s, u_b, q = split(w)
                     ux, uy = split(uvec)
                     ux_s, uy_s = split(u_s)
+                    ux_b, uy_b = split(u_b)
 
                     dw = TrialFunction(W)
-                    vvect, eta, r = TestFunctions(W)
+                    vvect, eta, xi, r = TestFunctions(W)
                     v1, v2 = split(vvect)
 
                 mu = viscosity(ux, uy, n)
@@ -68,51 +65,29 @@ for dt in dts:
                 n = FacetNormal(mesh3D)
                 F += grounded * beta2 * dot(uvec, vvect) * ds_b - grounded * beta2 * (ux * n[0] + uy * n[1]) * dot(as_vector((n[0], n[1])), vvect) * ds_b
 
-                # Set up the ocean pressure.
-                p_o = po = conditional(sigma < 0.0, -rhow * g * sigma, 0.0)
-
-                F += rhoi * g * (zs - sigma) * (v1.dx(0) + v2.dx(1)) * ds_v(2) - p_o * dot(as_vector((n[0], n[1])), vvect) * ds_v(2)
-                #F += zeta * p_o * dot(as_vector((n[0], n[1])), vvect) * ds_b
+                p_o = conditional(sigma < 0.0, -rhow * g * sigma, 0.0)
+                F += rhoi * g * (zs - sigma) * dot(as_vector((n[0], n[1])), vvect) * ds_v(2) - p_o * dot(as_vector((n[0], n[1])), vvect) * ds_v(2)
 
                 F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
                 
                 if theta_out != 0 and FSSA_keyword == "full":
+                    
+                    # First line (excluding first term)
+                    F += theta * rhoi * g * dt * ((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zs.dx(0) + uy_b * zs.dx(1)) + q - a_s + (1 + zeta*(rhoi/rhow))* a_b) * (v1.dx(0) + v2.dx(1)) * dx
 
-
-                    F += theta * rhoi * g * dt * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
-                    F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * q * (v1.dx(0) + v2.dx(1)) * dx
-                    F += 0.5 * theta * rhoi * g * dt * (ux_s * (zs * zs).dx(0) + uy_s * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * surf * ds_t
-                    F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * (v1.dx(0) + v2.dx(1)) * surf * q * ds_t
+                    # Second line
+                    F -= theta * rhoi * g * dt * n[2] * zs * (((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zs.dx(0) + uy_b * zs.dx(1)) + q) - zeta * (rhoi/rhow) * (a_s - a_b) + a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
                 
+                    # Third line
+                    F -= theta * rhoi * g * dt * nz * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
+
+                    # Fourth line
+                    F += theta * dt * rhoi * g * a_s * nz * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t - theta * zeta * dt * rhoi * g * a_b * nz * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
+                    
                     # The constraints:
                     F += dot(u_s - uvec, eta) * ds_t
+                    F += dot(u_b - uvec, xi) * ds_b
                     F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
-
-                    # The accumulation terms:
-                    n_z = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
-                    F -= theta * a_s * n_z * rhoi * g * dt * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t
-                    F -= theta * rhoi * g * dt * a_s * (v1.dx(0) + v2.dx(1)) * dx
-
-                # The stabilisation terms (the version where we assume that test function gradients are depth independent)
-                if theta_out != 0 and FSSA_keyword == "approx":
-                    # This terms needs to be updated
-                    F += theta * rhoi * g * dt * thick * (ux * zs.dx(0) + uy * zs.dx(1)) * (v1.dx(0) + v2.dx(1)) * surf * ds_t
-                    F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * thick * (ux.dx(0) + uy.dx(1)) * (v1.dx(0) + v2.dx(1)) * dx
-                    F += 0.5 * theta * rhoi * g * dt * (ux * (zs * zs).dx(0) + uy * (zs * zs).dx(1)) * (v1.dx(0) + v2.dx(1)) * surf * ds_t
-                    F += theta * rhoi * g * dt * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) * zs * (v1.dx(0) + v2.dx(1)) * surf * thick * (ux.dx(0) + uy.dx(1)) * ds_t
-
-                    # The accumulation terms:
-                    n_z = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
-                    F -= theta * a_s * n_z * rhoi * g * dt * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t
-                    F -= theta * rhoi * g * dt * a_s * (v1.dx(0) + v2.dx(1)) * dx
-
-                z = SpatialCoordinate(mesh3D)[2]
-                sea_level = Constant(0.0)
-
-                p_ocean = rhow * g * max_value(sea_level - z, 0.0)
-
-                # To do: Get the ocean pressure properly set up. The current version is close, but not strictly accurate
-                #F += p_ocean * v1 * ds_v(2)
 
                 if theta_out == 0:
                     J = derivative(F, uvec, du)

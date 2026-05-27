@@ -38,18 +38,19 @@ uvec_out = Function(VV, name="uvec")
 # Mixed spaces
 # -----------------------------
 
-W = VV * VVbar * Vbar
+W = VV * VVbar * VVbar * Vbar
 w = Function(W)
 
-uvec, u_s, q = split(w)
+uvec, u_s, u_b, q = split(w)
 ux, uy = split(uvec)
 ux_s, uy_s = split(u_s)
+ux_b, uy_b = split(u_b)
 
 # -----------------------------
 # Test functions
 # -----------------------------
 
-vvect, eta, r = TestFunctions(W)
+vvect, eta, xi, r = TestFunctions(W)
 v1, v2 = split(vvect)
 
 phi = TestFunction(Vbar)

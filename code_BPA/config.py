@@ -15,7 +15,7 @@ FSSA_keyword = "full"
 T = 10000.0
 
 yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(1.0e-25 * yearinsec * 1.0e18)
+A = Constant(20.0)
 #omega = 2.0*np.pi / Lx
 g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)

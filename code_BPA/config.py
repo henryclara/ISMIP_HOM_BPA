@@ -9,7 +9,7 @@ nx = int(640/2)
 ny = int(40/2)
 nz = int(10/2)
 
-dts = [10]
+dts = [1]
 theta_outs = [1]
 FSSA_keyword = "full"
 T = 10000.0

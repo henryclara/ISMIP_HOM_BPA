@@ -1,6 +1,13 @@
 from firedrake import *
 import numpy as np
+import os
 from config import *
+
+start_step = 5000
+restart_from = "Simulations/restart_theta1_dt5_t{start_step}.h5"
+if restart_from is not None:
+    os.environ["RESTART_MESH_FILE"] = restart_from
+
 from domain import *
 from fields import *
 from physics import *
@@ -12,7 +19,12 @@ from io_local import *
 for dt in dts:
     for theta_out in theta_outs:
 
-        reset_state()
+        if restart_from is None:
+            reset_state()
+        else:
+            t_restart, start_step, dt_restart, theta_restart = load_restart(restart_from)
+            u_prev.assign(uvec_out)
+            print(f"Restarting from t={t_restart:g}, step={start_step}")
         
         print("=" * 80)
         print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
@@ -21,31 +33,38 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
+        outfile = VTKFile(f"Simulations/test_MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
+        geometry_outfile = VTKFile(f"Simulations/tmp_initial_geometry_theta{theta_out:g}_dt{dt:g}.pvd")
 
-        for i in range(num_TS):
+        # Output the initial geometry/state before starting the time-stepping solve.
+        ux_out, uy_out = split(uvec_out)
+        uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
+        grounded_out.interpolate(1.0 - tanh((zb - bed) / delta_zb))
+        geometry_outfile.write(uout, thick, zs, zb, grounded_out, time=0.0)
+
+        if theta_out == 0:
+            uvec = Function(VV)
+            uvec.assign(w.sub(0))
+
+            ux, uy = split(uvec)
+
+            du = TrialFunction(VV)
+            vvect = TestFunction(VV)
+            v1, v2 = split(vvect)
+
+        else:
+            uvec, u_s, u_b, q = split(w)
+            ux, uy = split(uvec)
+            ux_s, uy_s = split(u_s)
+            ux_b, uy_b = split(u_b)
+
+            dw = TrialFunction(W)
+            vvect, eta, xi, r = TestFunctions(W)
+            v1, v2 = split(vvect)
+
+        for i in range(start_step, num_TS):
             for j, n in enumerate(ns):
                 print("Solving with n = ", n)
-
-                if theta_out == 0:
-                    uvec = Function(VV)
-                    uvec.interpolate(w.sub(0))
-
-                    ux, uy = split(uvec)
-
-                    du = TrialFunction(VV)
-                    vvect = TestFunction(VV)
-                    v1, v2 = split(vvect)
-
-                else:
-                    uvec, u_s, u_b, q = split(w)
-                    ux, uy = split(uvec)
-                    ux_s, uy_s = split(u_s)
-                    ux_b, uy_b = split(u_b)
-
-                    dw = TrialFunction(W)
-                    vvect, eta, xi, r = TestFunctions(W)
-                    v1, v2 = split(vvect)
 
                 mu = viscosity(ux, uy, n)
 
@@ -59,7 +78,7 @@ for dt in dts:
                                 + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
                                 + mu * uy.dx(2) * v2.dx(2) * dx
 
-                grounded = 1.0 - tanh((zb - bed) / delta_zb)
+                grounded = 0.5 * (1.0 - tanh((zb - bed) / delta_zb))
                 zeta = Constant(1.0) - grounded
 
                 n = FacetNormal(mesh3D)
@@ -79,10 +98,10 @@ for dt in dts:
                     F -= theta * rhoi * g * dt * n[2] * zs * (((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zs.dx(0) + uy_b * zs.dx(1)) + q) - zeta * (rhoi/rhow) * (a_s - a_b) + a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
                 
                     # Third line
-                    F -= theta * rhoi * g * dt * nz * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
+                    F -= theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
 
                     # Fourth line
-                    F += theta * dt * rhoi * g * a_s * nz * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t - theta * zeta * dt * rhoi * g * a_b * nz * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
+                    F += theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t - theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
                     
                     # The constraints:
                     F += dot(u_s - uvec, eta) * ds_t
@@ -146,15 +165,20 @@ for dt in dts:
                 + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
             )
 
+            old_thick = Function(Vbar)
+            old_thick.assign(thick)
+
             solve(lhs(F) == rhs(F), H)
             thick.assign(H)
             thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
+
+            sigma = (SpatialCoordinate(mesh3D)[2] - zb) / old_thick
 
             zb_float = -rhoi / rhow * thick
             zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
 
-            mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
+            mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma * thick]))
             print("Finished solving thickness evolution...")
             print("Year: ", (i+1)*dt)
 

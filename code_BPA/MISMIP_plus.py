@@ -1,10 +1,12 @@
+from math import tanh
+
 from firedrake import *
 import numpy as np
 import os
 from config import *
 
-start_step = 5000
-restart_from = "Simulations/restart_theta1_dt5_t{start_step}.h5"
+start_step = 0
+restart_from = None #f"Simulations/restart_theta1_dt5_t{start_step}.h5"
 if restart_from is not None:
     os.environ["RESTART_MESH_FILE"] = restart_from
 
@@ -16,11 +18,16 @@ from spaces import *
 from bcs import *
 from io_local import *
 
+Q0 = FunctionSpace(mesh3D, "DG", 0)
+grounded_fraction = Function(Q0, name="grounded_fraction")
+
 for dt in dts:
     for theta_out in theta_outs:
 
         if restart_from is None:
             reset_state()
+            t_restart = 0.0
+            start_step = 0
         else:
             t_restart, start_step, dt_restart, theta_restart = load_restart(restart_from)
             u_prev.assign(uvec_out)
@@ -33,14 +40,7 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        outfile = VTKFile(f"Simulations/test_MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
-        geometry_outfile = VTKFile(f"Simulations/tmp_initial_geometry_theta{theta_out:g}_dt{dt:g}.pvd")
-
-        # Output the initial geometry/state before starting the time-stepping solve.
-        ux_out, uy_out = split(uvec_out)
-        uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
-        grounded_out.interpolate(1.0 - tanh((zb - bed) / delta_zb))
-        geometry_outfile.write(uout, thick, zs, zb, grounded_out, time=0.0)
+        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
 
         if theta_out == 0:
             uvec = Function(VV)
@@ -63,86 +63,100 @@ for dt in dts:
             v1, v2 = split(vvect)
 
         for i in range(start_step, num_TS):
-            for j, n in enumerate(ns):
-                print("Solving with n = ", n)
+            print("Solving momentum")
 
-                mu = viscosity(ux, uy, n)
+            mu = viscosity(ux, uy, 3.0)
 
-                surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
+            surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
 
-                F = (4 * mu * ux.dx(0) + 2 * mu * uy.dx(1)) * v1.dx(0) * dx \
-                                + (mu * ux.dx(1) + mu * uy.dx(0)) * v1.dx(1) * dx \
-                                + mu * ux.dx(2) * v1.dx(2) * dx
-                            
-                F += (4 * mu * uy.dx(1) + 2 * mu * ux.dx(0)) * v2.dx(1) * dx \
-                                + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
-                                + mu * uy.dx(2) * v2.dx(2) * dx
+            F = (4 * mu * ux.dx(0) + 2 * mu * uy.dx(1)) * v1.dx(0) * dx \
+                            + (mu * ux.dx(1) + mu * uy.dx(0)) * v1.dx(1) * dx \
+                            + mu * ux.dx(2) * v1.dx(2) * dx
+                        
+            F += (4 * mu * uy.dx(1) + 2 * mu * ux.dx(0)) * v2.dx(1) * dx \
+                            + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
+                            + mu * uy.dx(2) * v2.dx(2) * dx
 
-                grounded = 0.5 * (1.0 - tanh((zb - bed) / delta_zb))
-                zeta = Constant(1.0) - grounded
+            #grounded = conditional(zb <= bed, 1.0, 0.0)
+            #zeta = conditional(zb <= bed, 0.0, 1.0)
 
-                n = FacetNormal(mesh3D)
-                F += grounded * beta2 * dot(uvec, vvect) * ds_b - grounded * beta2 * (ux * n[0] + uy * n[1]) * dot(as_vector((n[0], n[1])), vvect) * ds_b
+            # Grounding-line fraction: positive means grounded tendency
+            zb_float_now = -rhoi / rhow * thick
+            phi_gl = bed - zb_float_now  # positive = grounded
 
-                p_o = conditional(sigma < 0.0, -rhow * g * sigma, 0.0)
-                F += rhoi * g * (zs - sigma) * dot(as_vector((n[0], n[1])), vvect) * ds_v(2) - p_o * dot(as_vector((n[0], n[1])), vvect) * ds_v(2)
+            grounded_fraction.project(
+                conditional(phi_gl > 0.0, 1.0, 0.0)
+            )
 
-                F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
+            grounded = grounded_fraction
+            zeta = 1.0 - grounded
+
+            n = FacetNormal(mesh3D)
+            
+            m = Constant(3.0)
+            C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
+            F += grounded * C * dot(uvec, vvect) * ds_b
+
+            #p_o = conditional(sigma < 0.0, -rhow * g * sigma, 0.0)
+            #F += rhoi * g * (zs - sigma) * dot(as_vector((n[0], n[1])), vvect) * ds_v(2) - p_o * dot(as_vector((n[0], n[1])), vvect) * ds_v(2)
+
+            F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
+            
+            if theta_out != 0 and FSSA_keyword == "full":
                 
-                if theta_out != 0 and FSSA_keyword == "full":
-                    
-                    # First line (excluding first term)
-                    F += theta * rhoi * g * dt * ((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zs.dx(0) + uy_b * zs.dx(1)) + q - a_s + (1 + zeta*(rhoi/rhow))* a_b) * (v1.dx(0) + v2.dx(1)) * dx
-
-                    # Second line
-                    F -= theta * rhoi * g * dt * n[2] * zs * (((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zs.dx(0) + uy_b * zs.dx(1)) + q) - zeta * (rhoi/rhow) * (a_s - a_b) + a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
+                # First line (excluding first term)
+                F += theta * rhoi * g * dt * ((1 - zeta * rhoi/rhow) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q - a_s)- (1 + zeta * rhoi/rhow) * a_b) * (v1.dx(0) + v2.dx(1)) * dx
                 
-                    # Third line
-                    F -= theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
+                # Second line
+                F += theta * rhoi * g * dt * n[2] * zs * ((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
+                
+                # Third line
+                F += theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
 
-                    # Fourth line
-                    F += theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t - theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
-                    
-                    # The constraints:
-                    F += dot(u_s - uvec, eta) * ds_t
-                    F += dot(u_b - uvec, xi) * ds_b
-                    F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
+                # Fourth line
+                F -= theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t 
+                F += theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
+                
+                # The constraints:
+                F += dot(u_s - uvec, eta) * ds_t
+                F += dot(u_b - uvec, xi) * ds_b
+                F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
 
-                if theta_out == 0:
-                    J = derivative(F, uvec, du)
-                    problem = NonlinearVariationalProblem(F, uvec, bcs=bcs_u, J=J)
-                else:
-                    J = derivative(F, w, dw)
-                    problem = NonlinearVariationalProblem(F, w, bcs=bcs_w, J=J)
+            if theta_out == 0:
+                J = derivative(F, uvec, du)
+                problem = NonlinearVariationalProblem(F, uvec, bcs=bcs_u, J=J)
+            else:
+                J = derivative(F, w, dw)
+                problem = NonlinearVariationalProblem(F, w, bcs=bcs_w, J=J)
 
-                solver = NonlinearVariationalSolver(
-                    problem,
-                    solver_parameters={
-                        "snes_type": "newtonls",
-                        "snes_linesearch_type": "bt",
-                        "snes_rtol": 1.0e-5,
-                        "snes_atol": 1.0e-5,
-                        "snes_max_it": 200,
+            solver = NonlinearVariationalSolver(
+                problem,
+                solver_parameters={
+                    "snes_type": "newtonls",
+                    "snes_linesearch_type": "bt",
+                    "snes_rtol": 1.0e-5,
+                    "snes_atol": 1.0e-5,
+                    "snes_max_it": 200,
 
-                        "mat_type": "aij",
-                        "ksp_type": "preonly",
-                        "pc_type": "lu",
-                        "pc_factor_mat_solver_type": "mumps",
+                    "mat_type": "aij",
+                    "ksp_type": "preonly",
+                    "pc_type": "lu",
+                    "pc_factor_mat_solver_type": "mumps",
 
-                        "snes_monitor": None,
-                        "ksp_monitor_true_residual": None,
-                        "ksp_error_if_not_converged": None,
-                    },
-                )
+                    "snes_monitor": None,
+                    "ksp_monitor_true_residual": None,
+                    "ksp_error_if_not_converged": None,
+                },
+            )
 
-                solver.solve()
-                if theta_out == 0:
-                    uvec_out.assign(uvec)
-                    w.sub(0).assign(uvec_out)
-                else:
-                    uvec_out.assign(w.sub(0))
+            solver.solve()
+            if theta_out == 0:
+                uvec_out.assign(uvec)
+                w.sub(0).assign(uvec_out)
+            else:
+                uvec_out.assign(w.sub(0))
 
-                u_prev.assign(uvec_out)
+            u_prev.assign(uvec_out)
 
             print("Solving thickness evolution now...")
 
@@ -180,14 +194,26 @@ for dt in dts:
 
             mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma * thick]))
             print("Finished solving thickness evolution...")
-            print("Year: ", (i+1)*dt)
+            
 
-            t = (i + 1) * dt
+            if restart_from is None:
+                print("Year: ", (i+1)*dt)
+            else:
+                print("Year: ", (t_restart + (i - start_step + 1) * dt))
+
+            if restart_from is None:
+                t = (i + 1) * dt
+            else:
+                t = t_restart + (i - start_step + 1) * dt
 
             if abs(t % 50) < 1.0e-10 or abs((t % 50) - 50) < 1.0e-10:
                 ux_out, uy_out = split(uvec_out)
+                ux_s, uy_s = split(u_s)
+                ux_b, uy_b = split(u_b)
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
-                grounded_out.interpolate(1.0 - tanh((zb - bed) / delta_zb))
-                outfile.write(uout, thick, zs, zb, grounded_out, time=t)
+                usout.interpolate(as_vector([ux_s, uy_s, 0.0]))
+                ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))
+                grounded_out.interpolate(grounded)
+                outfile.write(uout, usout, ubout, thick, zs, zb, grounded_out, time=t)
                 restart_file = f"Simulations/restart_theta{theta_out:g}_dt{dt:g}_t{t:g}.h5"
                 save_restart(restart_file, t, i+1, dt, theta_out)

@@ -9,8 +9,8 @@ nx = int(640/2)
 ny = int(40/2)
 nz = int(10/2)
 
-dts = [1]
-theta_outs = [1]
+dts = [0.5]
+theta_outs = [0]
 FSSA_keyword = "full"
 T = 10000.0
 
@@ -35,4 +35,4 @@ zdeep = Constant(-720.0)
 a_s = Constant(0.3)
 a_b = Constant(0.0)
 
-ns = [3]
+n = 3.0

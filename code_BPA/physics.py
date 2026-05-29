@@ -5,7 +5,7 @@ from config import *
 from domain import *
 from spaces import *
 
-def viscosity(ux, uy, n=1):
+def viscosity(ux, uy, n=3.0):
     '''
     Double check this against the derivation
     '''

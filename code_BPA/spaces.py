@@ -1,3 +1,5 @@
+from symtable import Function
+
 from firedrake import *
 import numpy as np
 from config import *
@@ -25,6 +27,8 @@ VV = FunctionSpace(mesh3D, vector_elt)
 
 VV3 = FunctionSpace(mesh3D, vector3_elt)
 uout = Function(VV3, name="uout")
+usout = Function(VV3, name="usout")
+ubout = Function(VV3, name="ubout")
 
 Vbar = FunctionSpace(mesh3D, "CG", 1, vfamily="R", vdegree=0)
 VVbar = VectorFunctionSpace(mesh3D, "CG", 1, vfamily="R", vdegree=0, dim=2)

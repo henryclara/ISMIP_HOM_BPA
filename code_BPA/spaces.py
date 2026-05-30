@@ -1,5 +1,3 @@
-from symtable import Function
-
 from firedrake import *
 import numpy as np
 from config import *

@@ -6,7 +6,7 @@ import os
 from config import *
 
 start_step = 0
-restart_from = None #f"Simulations/restart_theta1_dt5_t{start_step}.h5"
+restart_from = None #f"Simulations/MISMIP_output_theta1_dt10/restart_t{start_step}.h5"
 if restart_from is not None:
     os.environ["RESTART_MESH_FILE"] = restart_from
 
@@ -40,7 +40,7 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}.pvd")
+        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}.pvd")
 
         if theta_out == 0:
             uvec = Function(VV)
@@ -89,7 +89,6 @@ for dt in dts:
             )
 
             grounded = grounded_fraction
-            zeta = 1.0 - grounded
 
             n = FacetNormal(mesh3D)
             
@@ -101,7 +100,13 @@ for dt in dts:
             #F += rhoi * g * (zs - sigma) * dot(as_vector((n[0], n[1])), vvect) * ds_v(2) - p_o * dot(as_vector((n[0], n[1])), vvect) * ds_v(2)
 
             F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
-            
+
+            if zeta_pred == False:
+                zeta = 1.0 - grounded
+            elif zeta_pred == True:
+                H_k_plus_1 = thick - dt * (q + (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + a_s - a_b)
+                zeta = 0.5 * (1 - ((bed + (rhoi/rhow) * H_k_plus_1) / sqrt((bed + (rhoi/rhow) * H_k_plus_1)**2 + eps_H**2) ))
+
             if theta_out != 0 and FSSA_keyword == "full":
                 
                 # First line (excluding first term)
@@ -161,7 +166,7 @@ for dt in dts:
             print("Solving thickness evolution now...")
 
             ubar = Function(VVbar, name="u_bar")
-            ubar.project(uvec_out, bcs=bcs_ubar)
+            ubar.project(uvec_out)  # testing this without the BCs. Older version:    ubar.project(uvec_out, bcs=bcs_ubar)
             ux_bar, uy_bar = split(ubar)
 
             vel = as_vector([ux_bar, uy_bar])
@@ -215,5 +220,5 @@ for dt in dts:
                 ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))
                 grounded_out.interpolate(grounded)
                 outfile.write(uout, usout, ubout, thick, zs, zb, grounded_out, time=t)
-                restart_file = f"Simulations/restart_theta{theta_out:g}_dt{dt:g}_t{t:g}.h5"
+                restart_file = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}/restart_t{t:g}.h5"
                 save_restart(restart_file, t, i+1, dt, theta_out)

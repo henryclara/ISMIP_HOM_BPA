@@ -5,12 +5,12 @@ Lx = 640000.0
 Ly_full = 80000.0
 Ly = Ly_full / 2.0
 
-nx = int(640/2)
-ny = int(40/2)
+nx = int(640/4)
+ny = int(40/4)
 nz = int(10/2)
 
-dts = [0.5]
-theta_outs = [0]
+dts = [10]
+theta_outs = [1]
 FSSA_keyword = "full"
 T = 10000.0
 
@@ -36,3 +36,6 @@ a_s = Constant(0.3)
 a_b = Constant(0.0)
 
 n = 3.0
+
+eps_H = 1e-6
+zeta_pred = False

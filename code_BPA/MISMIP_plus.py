@@ -1,11 +1,9 @@
-from math import sqrt, tanh
-from pyclbr import Function
-from turtle import dot
 
 from firedrake import *
 import numpy as np
 import os
 from config import *
+from datetime import datetime
 
 start_step = 0
 restart_from = None #f"Simulations/MISMIP_output_theta1_dt10/restart_t{start_step}.h5"
@@ -23,10 +21,12 @@ from io_local import *
 Q1 = FunctionSpace(mesh3D, "CG", 1)
 zeta = Function(Q1, name="zeta")
 zeta_out = Function(Q1, name="zeta_out")
-#grounded_prediction_out = Function(Q1, name="grounded_prediction_out")
+zeta_predicted = Function(Q1, name="zeta_predicted")
 
 for dt in dts:
     for theta_out in theta_outs:
+
+        simulation_start = datetime.now()
 
         if restart_from is None:
             reset_state()
@@ -82,11 +82,10 @@ for dt in dts:
                             + mu * uy.dx(2) * v2.dx(2) * dx
 
             phi_float = bed + (rhoi/rhow) * thick
-            delta_GL = Constant(50.0)
+            delta_GL = Constant(0.01)
             grounded_prediction = Function(Q1, name="grounded_prediction")
 
             n = FacetNormal(mesh3D)
-        
 
             F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
 
@@ -102,13 +101,12 @@ for dt in dts:
                 )
                 phi_pred = bed + (rhoi/rhow) * H_k_plus_1
                 zeta.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
-
-            grounded = 1.0 - zeta
-            grounded_prediction.interpolate(grounded)
+                
+            zeta_predicted.assign(zeta)
 
             m = Constant(3.0)
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
-            F += grounded * C * dot(uvec, vvect) * ds_b
+            F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
 
             if theta_out != 0 and FSSA_keyword == "full":
                 
@@ -194,13 +192,22 @@ for dt in dts:
             thick.assign(H)
             thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
 
-            sigma = (SpatialCoordinate(mesh3D)[2] - zb) / old_thick
+            z_ref = Function(Q1, name="z_ref")
+            z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
+
+            sigma_ref = Function(Q1, name="sigma_ref")
+            sigma_ref.interpolate((z_ref - zb) / thick)
+
+            #sigma = sigmaref
 
             zb_float = -rhoi / rhow * thick
             zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
 
-            mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma * thick]))
+            phi_float_actual = bed + (rhoi/rhow) * thick
+            zeta.interpolate(0.5 * (1.0 - tanh(phi_float_actual / delta_GL)))
+
+            mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma_ref * thick]))
             print("Finished solving thickness evolution...")
             
 
@@ -214,16 +221,20 @@ for dt in dts:
             else:
                 t = t_restart + (i - start_step + 1) * dt
 
-            if abs(t % 5) < 1.0e-10 or abs((t % 5) - 5) < 1.0e-10:
+            if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
                 ux_out, uy_out = split(uvec_out)
                 ux_s, uy_s = split(u_s)
                 ux_b, uy_b = split(u_b)
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
                 usout.interpolate(as_vector([ux_s, uy_s, 0.0]))
                 ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))
-                zeta_out.interpolate(zeta_)
-                outfile.write(uout, usout, ubout, thick, zs, zb, bed, zeta_out, time=t)
+                zeta_out.interpolate(zeta)
+                outfile.write(uout, usout, ubout, thick, zs, zb, bed, zeta_out, zeta_predicted, time=t)
                 restart_dir = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
                 os.makedirs(restart_dir, exist_ok=True)
                 restart_file = f"{restart_dir}/restart_t{t:g}.h5"
                 save_restart(restart_file, t, i+1, dt, theta_out)
+
+        simulation_end = datetime.now()
+        print(f"Simulation time: {simulation_end - simulation_start}")
+        

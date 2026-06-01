@@ -9,7 +9,7 @@ nx = int(640/4)
 ny = int(40/4)
 nz = int(10/2)
 
-dts = [10]
+dts = [5]
 theta_outs = [1]
 FSSA_keyword = "full"
 T = 10000.0
@@ -37,5 +37,5 @@ a_b = Constant(0.0)
 
 n = 3.0
 
-eps_H = 1e-6
-zeta_pred = False
+eps_H = 100.0
+zeta_pred = True

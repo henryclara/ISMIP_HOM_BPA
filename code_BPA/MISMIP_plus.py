@@ -1,5 +1,6 @@
-from math import tanh
+from math import sqrt, tanh
 from pyclbr import Function
+from turtle import dot
 
 from firedrake import *
 import numpy as np
@@ -20,8 +21,9 @@ from bcs import *
 from io_local import *
 
 Q1 = FunctionSpace(mesh3D, "CG", 1)
-grounded_fraction = Function(Q1, name="grounded_fraction")
-grounded_prediction_out = Function(Q1, name="grounded_prediction_out")
+zeta = Function(Q1, name="zeta")
+zeta_out = Function(Q1, name="zeta_out")
+#grounded_prediction_out = Function(Q1, name="grounded_prediction_out")
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -79,59 +81,34 @@ for dt in dts:
                             + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
                             + mu * uy.dx(2) * v2.dx(2) * dx
 
-            #grounded = conditional(zb <= bed, 1.0, 0.0)
-            #zeta = conditional(zb <= bed, 0.0, 1.0)
-
-            # Grounding-line fraction: positive means grounded tendency
-            zb_float_now = -rhoi / rhow * thick
-            phi_gl = bed - zb_float_now  # positive = grounded
-
-            #grounded_fraction.interpolate(
-            #    conditional(phi_gl > 0.0, 1.0, 0.0)
-            #)
-
-            phi_float = bed + (rhoi/rhow) * thick   # >=0 grounded, <0 floating
-
-            delta_GL = Constant(50.0)  # metres; tune this
-
-            grounded_fraction.interpolate(
-                max_value(
-                    0.0,
-                    min_value(
-                        1.0,
-                        0.5 + phi_float / (2.0 * delta_GL)
-                    )
-                )
-            )
-
-            #grounded = grounded_fraction
-            #grounded_prediction = grounded
-
-            grounded = grounded_fraction
+            phi_float = bed + (rhoi/rhow) * thick
+            delta_GL = Constant(50.0)
             grounded_prediction = Function(Q1, name="grounded_prediction")
-            grounded_prediction.assign(grounded_fraction)
 
             n = FacetNormal(mesh3D)
-            
-            m = Constant(3.0)
-            C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
-            F += grounded * C * dot(uvec, vvect) * ds_b
-
-            #p_o = conditional(sigma < 0.0, -rhow * g * sigma, 0.0)
-            #F += rhoi * g * (zs - sigma) * dot(as_vector((n[0], n[1])), vvect) * ds_v(2) - p_o * dot(as_vector((n[0], n[1])), vvect) * ds_v(2)
+        
 
             F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
 
             if zeta_pred == False:
-                zeta = 1.0 - grounded
-            elif zeta_pred == True:
-                #H_k_plus_1 = thick - dt * (q + (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) - a_s + a_b)
-                #zeta = 0.5 * (1 - ((bed + (rhoi/rhow) * H_k_plus_1) / sqrt((bed + (rhoi/rhow) * H_k_plus_1)**2 + eps_H**2) ))
+                zeta.interpolate(0.5 * (1.0 - tanh(phi_float / delta_GL)))
 
-                H_k_plus_1 = thick - dt * (q + (ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) - a_s + a_b)
+            elif zeta_pred == True:
+                H_k_plus_1 = thick - dt * (
+                    q
+                    + (ux_s * zs.dx(0) + uy_s * zs.dx(1))
+                    - (ux_b * zb.dx(0) + uy_b * zb.dx(1))
+                    - a_s + a_b
+                )
                 phi_pred = bed + (rhoi/rhow) * H_k_plus_1
-                delta_GL = Constant(50.0)  # try 100, 50, 25
-                zeta = 0.5 * (1.0 - tanh(phi_pred / delta_GL))
+                zeta.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
+
+            grounded = 1.0 - zeta
+            grounded_prediction.interpolate(grounded)
+
+            m = Constant(3.0)
+            C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
+            F += grounded * C * dot(uvec, vvect) * ds_b
 
             if theta_out != 0 and FSSA_keyword == "full":
                 
@@ -223,15 +200,6 @@ for dt in dts:
             zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
 
-            zb_float_now = -rhoi / rhow * thick
-            phi_gl = bed - zb_float_now  # positive = grounded
-
-            grounded_fraction.interpolate(
-                conditional(phi_gl > 0.0, 1.0, 0.0)
-            )
-
-            grounded = grounded_fraction
-
             mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma * thick]))
             print("Finished solving thickness evolution...")
             
@@ -253,9 +221,8 @@ for dt in dts:
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
                 usout.interpolate(as_vector([ux_s, uy_s, 0.0]))
                 ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))
-                grounded_out.interpolate(grounded)
-                grounded_prediction_out.interpolate(grounded_prediction)
-                outfile.write(uout, usout, ubout, thick, zs, zb, bed, grounded_out, grounded_prediction_out, time=t)
+                zeta_out.interpolate(zeta_)
+                outfile.write(uout, usout, ubout, thick, zs, zb, bed, zeta_out, time=t)
                 restart_dir = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
                 os.makedirs(restart_dir, exist_ok=True)
                 restart_file = f"{restart_dir}/restart_t{t:g}.h5"

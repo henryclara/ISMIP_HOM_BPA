@@ -10,9 +10,9 @@ ny = int(40/4)
 nz = int(10/2)
 
 dts = [10]
-theta_outs = [0]
+theta_outs = [1]
 FSSA_keyword = "full"
-T = 500.0
+T = 100.0
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(20.0)
@@ -38,4 +38,4 @@ a_b = Constant(0.0)
 n = 3.0
 
 eps_H = 100.0
-zeta_pred = False
+zeta_pred = True

@@ -4,9 +4,10 @@ import numpy as np
 import time
 
 Lx = 80000.0
-nz = 10
+nx = 400
+nz = 160
 
-base = PeriodicIntervalMesh(50, Lx)
+base = PeriodicIntervalMesh(nx, Lx)
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
 
 x, sigma = SpatialCoordinate(mesh)
@@ -28,13 +29,12 @@ VV2 = FunctionSpace(mesh, vector2_elt)
 uout = Function(VV2, name="uout")
 
 Vbar = FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
-Ubar = FunctionSpace(mesh, "CG", 1, vfamily="R", vdegree=0)
 
-W = U * Ubar * Vbar
+W = U * Vbar
 w = Function(W)
 
-u, u_s, q = split(w)
-v, eta, r = TestFunctions(W)
+u, q = split(w)
+v, r = TestFunctions(W)
 
 u_out = Function(U, name="u")
 
@@ -74,16 +74,16 @@ ns = [3] #np.linspace(1, 3, 11)
 
 # Basal friction field
 beta2 = Function(Vbar, name="beta2")
-beta2.interpolate(1000.0 * (1.0 + sin(2.0*np.pi*x/Lx)))
+beta2.interpolate(1000.0 * (1.0 + sin(2.0*pi*xref/Lx)))
 
-a_s = 0.0
-a_b = 0.0
+a_s = Constant(0.0)
+a_b = Constant(0.0)
 
 dts = [50]
 theta_outs = [1]
 
 zeta = Constant(0.0)
-T = 2000.0
+T = 5000.0
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -100,18 +100,17 @@ for dt in dts:
         thick.interpolate(zs - zb)
         mesh.coordinates.interpolate(as_vector([xref, zb + sigmaref * thick]))
 
-        u_init = 10.0 * (1.0 + 0.01 * sin(2.0*pi*x/Lx))
+        u_init = 10.0 * (1.0 + 0.01 * sin(2.0*pi*xref/Lx))
 
         w.sub(0).interpolate(u_init)
-        w.sub(1).interpolate(u_init)
 
         u0 = w.sub(0)
-        w.sub(2).project(thick * u0.dx(0))
+        w.sub(1).project(thick * u0.dx(0))
 
         u_prev.assign(0.0)
         u_prev_ts.assign(0.0)
 
-        outfile = VTKFile(f"BPA_output_dt{dt:g}_theta{theta_out:g}_A1e-25_nx100_beta1000.pvd")
+        outfile = VTKFile(f"Simulations/BPA_output_dt{dt:g}_theta{theta_out:g}_nx{nx}_nz{nz}.pvd")
 
         for i in range(num_TS):
             for j, n in enumerate(ns):
@@ -134,16 +133,14 @@ for dt in dts:
                     u_for_form = u_solve
 
                 else:
-                    u, u_s, q = split(w)
+                    u, q = split(w)
 
                     dw = TrialFunction(W)
-                    v, eta, r = TestFunctions(W)
+                    v, r = TestFunctions(W)
 
                     u_for_form = u
 
                 mu = viscosity(u_for_form, n)
-
-                surf = 1 / sqrt(1 + zs.dx(0)**2)
 
                 F = (
                     4 * mu * u_for_form.dx(0) * v.dx(0) * dx
@@ -152,21 +149,15 @@ for dt in dts:
                 )
 
                 if theta_out != 0:
-                    F += theta * rhoi * g * dt * (u_s * zs.dx(0)) * v.dx(0) * dx
+                    n_z = 1.0 / sqrt(1.0 + zs.dx(0)**2)
 
-                    F += theta * rhoi * g * np.cos(psi) * dt \
-                        * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                        * q * v.dx(0) * dx
-
-                    F += 0.5 * theta * g * np.cos(psi) * dt \
-                        * u * (zs * zs).dx(0) * v.dx(0) \
-                        * (1 / sqrt(1 + zs.dx(0)**2)) * ds_t
-
-                    F += theta * rhoi * g * np.cos(psi) * dt \
-                        * (((1 - zeta) * rhoi - rhow)/(rhoi - rhow)) \
-                        * zs * (v.dx(0) / sqrt(1 + zs.dx(0)**2)) * q * ds_t
-
-                    F += (u_s - u) * eta * ds_t
+                    F += theta * rhoi * g * np.cos(psi) * dt * q * v.dx(0) * dx
+                    F += theta * rhoi * g * np.cos(psi) * dt * n_z * zs * q * v.dx(0) * ds_t
+                    F += theta * rhoi * g * np.cos(psi) * dt * (n_z * thick + zs) * u * zs.dx(0) * v.dx(0)* ds_t
+                    F -= theta* (u * zs.dx(0) + q) * rhoi * g * dt * np.sin(psi) * n_z * v * ds_t
+                    F -= theta * rhoi * g * np.cos(psi) * dt * n_z * thick * a_s * v.dx(0) * ds_t
+                    F -= theta * rhoi * g * np.cos(psi) * dt * a_s * n_z * zs.dx(0) * v * ds_t
+                    F += theta * rhoi * g * dt * np.sin(psi) * a_s * n_z * v * ds_t
                     F += r * q * dx - r * thick * u.dx(0) * dx
 
                 F -= rhoi * g * np.cos(psi) * zs * v.dx(0) * dx \
@@ -186,7 +177,7 @@ for dt in dts:
                         "snes_linesearch_type": "bt",
                         "snes_rtol": 1.0e-8,
                         "snes_atol": 1.0e-10,
-                        "snes_max_it": 50,
+                        "snes_max_it": 100,
 
                         "mat_type": "aij",
                         "ksp_type": "preonly",
@@ -236,7 +227,7 @@ for dt in dts:
 
             t = (i + 1) * dt
 
-            if abs(t % 50.0) < 1.0e-10 or abs((t % 50.0) - 50.0) < 1.0e-10:
+            if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
                 #uout.interpolate(as_vector([ux, uy, 0.0]))
                 uout.interpolate(as_vector([u_out, 0.0]))
                 outfile.write(uout, thick, zs, zb, time=t)

@@ -1,6 +1,5 @@
 
 from firedrake import *
-from netgen.occ import *
 import numpy as np
 import time
 
@@ -20,7 +19,6 @@ xref, sigmaref = split(Xref)
 horiz = FiniteElement("CG", interval, 1)
 vert  = FiniteElement("CG", interval, 1)
 scalar_elt = TensorProductElement(horiz, vert)
-V = FunctionSpace(mesh, scalar_elt)
 
 U = FunctionSpace(mesh, scalar_elt)
 
@@ -59,7 +57,7 @@ rhow = 1028.0/(1.0e6*yearinsec**2)
 
 zs = Function(Vbar, name="zs").interpolate(0.0)
 zb = Function(Vbar, name="zb").interpolate(zs - 1000.0 \
-             + 500.0 * sin(omega * x))
+             + 500.0 * sin(omega * xref))
 
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
@@ -98,7 +96,7 @@ for dt in dts:
         num_TS = int(T / dt)
 
         zs.interpolate(0.0)
-        zb.interpolate(zs - 1000.0 + 500.0 * sin(omega * x))
+        zb.interpolate(- 1000.0 + 500.0 * sin(omega * xref))
         thick.interpolate(zs - zb)
         mesh.coordinates.interpolate(as_vector([xref, zb + sigmaref * thick]))
 
@@ -145,15 +143,12 @@ for dt in dts:
 
                 mu = viscosity(u_for_form, n)
 
-                grad_zs_H = as_vector([zs.dx(0), zs.dx(1)])
-                surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
-
-                mu = viscosity(u, n)
+                surf = 1 / sqrt(1 + zs.dx(0)**2)
 
                 F = (
-                    4 * mu * u.dx(0) * v.dx(0) * dx
-                    + mu * u.dx(1) * v.dx(1) * dx
-                    + beta2 * u * v * ds_b
+                    4 * mu * u_for_form.dx(0) * v.dx(0) * dx
+                    + mu * u_for_form.dx(1) * v.dx(1) * dx
+                    + beta2 * u_for_form * v * ds_b
                 )
 
                 if theta_out != 0:
@@ -178,8 +173,8 @@ for dt in dts:
                     - rhoi * g * np.sin(psi) * v * dx
 
                 if theta_out == 0:
-                    J = derivative(F, uvec, du)
-                    problem = NonlinearVariationalProblem(F, uvec, J=J)
+                    J = derivative(F, u_solve, du)
+                    problem = NonlinearVariationalProblem(F, u_solve, J=J)
                 else:
                     J = derivative(F, w, dw)
                     problem = NonlinearVariationalProblem(F, w, J=J)
@@ -206,16 +201,16 @@ for dt in dts:
 
                 solver.solve()
                 if theta_out == 0:
-                    uvec_out.assign(uvec)
-                    w.sub(0).assign(uvec_out)
+                    u_out.assign(u_solve)
+                    w.sub(0).assign(u_out)
                 else:
-                    uvec_out.assign(w.sub(0))
+                    u_out.assign(w.sub(0))
 
-                u_prev.assign(uvec_out)
+                u_prev.assign(u_out)
 
             print("Solving thickness evolution now...")
 
-            ubar = Function(VVbar, name="u_bar")
+            ubar = Function(Vbar, name="u_bar")
             ubar.project(u_out)
 
             vnorm = sqrt(ubar**2 + 1e-10)
@@ -226,13 +221,16 @@ for dt in dts:
                 thick_new * phi * dx
                 - thick * phi * dx
                 + dt * (ubar * thick_new).dx(0) * phi * dx
-                + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
+                + dt * mu_art * thick_new.dx(0) * phi.dx(0) * dx
             )
 
             solve(lhs(F) == rhs(F), H)
+
             thick.assign(H)
             thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
-            mesh.coordinates.interpolate(as_vector([xref, yref, zb + sigmaref * thick]))
+            zs.assign(zb + thick)
+            mesh.coordinates.interpolate(as_vector([xref, zb + sigmaref * thick]))
+
             print("Finished solving thickness evolution...")
             print("Year: ", (i+1)*dt)
 
@@ -240,7 +238,6 @@ for dt in dts:
 
             if abs(t % 50.0) < 1.0e-10 or abs((t % 50.0) - 50.0) < 1.0e-10:
                 #uout.interpolate(as_vector([ux, uy, 0.0]))
-                ux_out, uy_out = split(uvec_out)
-                uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
-                outfile.write(uout, thick, time=t)
+                uout.interpolate(as_vector([u_out, 0.0]))
+                outfile.write(uout, thick, zs, zb, time=t)
                 

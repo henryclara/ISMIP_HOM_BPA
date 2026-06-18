@@ -1,11 +1,42 @@
 
 from firedrake import *
+from firedrake import CheckpointFile
 import numpy as np
-import time
+import os
+import csv
+from datetime import datetime
+
+def save_restart(filename, mesh, w, u_out, thick, zs, zb, t, dt, nx, nz, time_stepping):
+    """
+    Save the current simulation state for later error calculations or restart.
+
+    Current 2D variables:
+        w.sub(0) = u
+        w.sub(1) = q
+        u_out    = scalar horizontal velocity
+        thick    = ice thickness
+        zs       = surface elevation
+        zb       = bed elevation
+    """
+    with CheckpointFile(filename, "w") as afile:
+        afile.save_mesh(mesh)
+
+        afile.save_function(w, name="w")
+        afile.save_function(u_out, name="u")
+        afile.save_function(thick, name="thick")
+        afile.save_function(zs, name="zs")
+        afile.save_function(zb, name="zb")
+
+        # Optional metadata as attributes
+        afile.h5pyfile.attrs["time"] = float(t)
+        afile.h5pyfile.attrs["dt"] = float(dt)
+        afile.h5pyfile.attrs["nx"] = int(nx)
+        afile.h5pyfile.attrs["nz"] = int(nz)
+        afile.h5pyfile.attrs["time_stepping"] = time_stepping
 
 Lx = 80000.0
 nx = 400
-nz = 160
+nz = 40
 
 base = PeriodicIntervalMesh(nx, Lx)
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -79,11 +110,12 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*pi*xref/Lx)))
 a_s = Constant(0.0)
 a_b = Constant(0.0)
 
-dts = [50]
-theta_outs = [1]
+dts = [5, 0.1]
+theta_outs = [0, 1]
 
 zeta = Constant(0.0)
-T = 5000.0
+T = 100.0
+time_stepping = "im"
 
 for dt in dts:
     for theta_out in theta_outs:
@@ -91,6 +123,8 @@ for dt in dts:
         print("=" * 80)
         print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
         print("=" * 80)
+
+        simulation_start = datetime.now()
 
         theta = Constant(theta_out)
         num_TS = int(T / dt)
@@ -208,12 +242,22 @@ for dt in dts:
             h = CellDiameter(mesh)
             mu_art = 0.1 * h * vnorm
 
-            F = (
-                thick_new * phi * dx
-                - thick * phi * dx
-                + dt * (ubar * thick_new).dx(0) * phi * dx
-                + dt * mu_art * thick_new.dx(0) * phi.dx(0) * dx
-            )
+            if time_stepping == "im":
+                F = (
+                    thick_new * phi * dx
+                    - thick * phi * dx
+                    + dt * (ubar * thick_new).dx(0) * phi * dx
+                    + dt * mu_art * thick_new.dx(0) * phi.dx(0) * dx
+                )
+            if time_stepping == "im_mi":
+                H_mid = 0.5 * (thick_new + thick)
+
+                F = (
+                    thick_new * phi * dx
+                    - thick * phi * dx
+                    + dt * (ubar * H_mid).dx(0) * phi * dx
+                    + dt * mu_art * H_mid.dx(0) * phi.dx(0) * dx
+                )
 
             solve(lhs(F) == rhs(F), H)
 
@@ -227,8 +271,19 @@ for dt in dts:
 
             t = (i + 1) * dt
 
-            if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
+            if abs(t % 100) < 1.0e-10 or abs((t % 100) - 100) < 1.0e-10:
                 #uout.interpolate(as_vector([ux, uy, 0.0]))
                 uout.interpolate(as_vector([u_out, 0.0]))
                 outfile.write(uout, thick, zs, zb, time=t)
-                
+                restart_dir = f"Simulations/BPA_output_dt{dt:g}_theta{theta_out:g}_nx{nx}_nz{nz}"
+                os.makedirs(restart_dir, exist_ok=True)
+                restart_file = f"{restart_dir}/restart_t{t:g}.h5"
+                save_restart(restart_file,mesh,w,u_out,thick,zs,zb,t,dt,nx,nz,time_stepping)
+
+        simulation_end = datetime.now()
+        os.makedirs("Simulations", exist_ok=True)
+        with open("Simulations/simulation_times.txt", "a") as f:
+            f.write(f"dt={dt:g}, theta_out={theta_out:g}, nx={nx}, nz={nz}, "
+                f"T={T:g}, start={simulation_start}, end={simulation_end}, "
+                f"runtime={simulation_end - simulation_start}\n"
+            )

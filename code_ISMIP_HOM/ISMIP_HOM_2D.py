@@ -1,4 +1,6 @@
 
+from math import sqrt
+
 from firedrake import *
 from firedrake import CheckpointFile
 import numpy as np
@@ -35,8 +37,8 @@ def save_restart(filename, mesh, w, u_out, thick, zs, zb, t, dt, nx, nz, time_st
         afile.h5pyfile.attrs["time_stepping"] = time_stepping
 
 Lx = 80000.0
-nx = 400
-nz = 40
+nx = 100
+nz = 10
 
 base = PeriodicIntervalMesh(nx, Lx)
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -77,18 +79,18 @@ u_prev = Function(U)
 u_prev_ts = Function(U)
 
 yearinsec = 365.25 * 24 * 60 * 60
-A = Constant(1.0e-25 * yearinsec * 1.0e18)
+A = Constant(2.0e-25 * yearinsec * 1.0e18)
 #alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 #tan_alpha = np.tan(alpha)
-psi = np.deg2rad(1.0)
+psi = np.deg2rad(3.0)
 g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)
 rhow = 1028.0/(1.0e6*yearinsec**2)
 
-zs = Function(Vbar, name="zs").interpolate(0.0)
-zb = Function(Vbar, name="zb").interpolate(zs - 1000.0 \
-             + 500.0 * sin(omega * xref))
+zs = Function(Vbar, name="zs").interpolate(500.0 * sin(omega * xref))
+#zs = Function(Vbar, name="zs").interpolate(0.0)
+zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * xref))
 
 thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
@@ -110,11 +112,11 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*pi*xref/Lx)))
 a_s = Constant(0.0)
 a_b = Constant(0.0)
 
-dts = [5, 0.1]
-theta_outs = [0, 1]
+dts = [0.01]
+theta_outs = [0]
 
 zeta = Constant(0.0)
-T = 100.0
+T = 10.0
 time_stepping = "im"
 
 for dt in dts:
@@ -182,20 +184,28 @@ for dt in dts:
                     + beta2 * u_for_form * v * ds_b
                 )
 
+                nz_s = 1.0 / sqrt(1.0 + zs.dx(0)**2)
+                nz_b = 1.0 / sqrt(1.0 + zb.dx(0)**2)
+
                 if theta_out != 0:
-                    n_z = 1.0 / sqrt(1.0 + zs.dx(0)**2)
 
                     F += theta * rhoi * g * np.cos(psi) * dt * q * v.dx(0) * dx
-                    F += theta * rhoi * g * np.cos(psi) * dt * n_z * zs * q * v.dx(0) * ds_t
-                    F += theta * rhoi * g * np.cos(psi) * dt * (n_z * thick + zs) * u * zs.dx(0) * v.dx(0)* ds_t
-                    F -= theta* (u * zs.dx(0) + q) * rhoi * g * dt * np.sin(psi) * n_z * v * ds_t
-                    F -= theta * rhoi * g * np.cos(psi) * dt * n_z * thick * a_s * v.dx(0) * ds_t
-                    F -= theta * rhoi * g * np.cos(psi) * dt * a_s * n_z * zs.dx(0) * v * ds_t
-                    F += theta * rhoi * g * dt * np.sin(psi) * a_s * n_z * v * ds_t
+                    F -= theta * rhoi * g * np.cos(psi) * dt * a_s * v.dx(0) * dx
+                    
+                    F += theta * rhoi * g * np.cos(psi) * dt * nz_s * q * v * zs.dx(0) * ds_t
+                    F -= theta * rhoi * g * np.cos(psi) * dt * nz_s * a_s * v * zs.dx(0) * ds_t
+
+                    F += theta * rhoi * g * np.cos(psi) * dt * nz_b * q * v * zb.dx(0) * ds_b
+                    F -= theta * rhoi * g * np.cos(psi) * dt * nz_b * a_s * v * zb.dx(0) * ds_b
+
+                    # Constraint for q
                     F += r * q * dx - r * thick * u.dx(0) * dx
 
-                F -= rhoi * g * np.cos(psi) * zs * v.dx(0) * dx \
-                    - rhoi * g * np.sin(psi) * v * dx
+                F -= rhoi * g * np.cos(psi) * zs * v.dx(0) * dx
+                F += rhoi * g * np.sin(psi) * v * dx
+                
+                F -= rhoi * g * np.cos(psi) * nz_s * zs * v * zs.dx(0) * ds_t
+                F -= rhoi * g * np.cos(psi) * nz_b * zs * v * zb.dx(0) * ds_b
 
                 if theta_out == 0:
                     J = derivative(F, u_solve, du)
@@ -271,7 +281,7 @@ for dt in dts:
 
             t = (i + 1) * dt
 
-            if abs(t % 100) < 1.0e-10 or abs((t % 100) - 100) < 1.0e-10:
+            if abs(t % 10) < 1.0e-10 or abs((t % 10) - 10) < 1.0e-10:
                 #uout.interpolate(as_vector([ux, uy, 0.0]))
                 uout.interpolate(as_vector([u_out, 0.0]))
                 outfile.write(uout, thick, zs, zb, time=t)

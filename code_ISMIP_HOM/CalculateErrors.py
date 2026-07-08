@@ -5,19 +5,19 @@ import matplotlib.pyplot as plt
 import os
 
 T = 100
-dts = [5]
+dts = [0.1, 1, 2, 5, 10, 20, 50]
 theta_values = [0, 1]
 
-ref_dt = 0.1
+ref_dt = 0.01
 ref_theta = 0
 
 resolution_pairs = [
-#    (100, 10),
+    (100, 10),
 #    (200, 20),
 #    (400, 40),
-    (800, 100),
+#    (800, 80),
+#    (1600, 160),
 ]
-
 
 def load_state(dt, theta, nx, nz):
     filename = (

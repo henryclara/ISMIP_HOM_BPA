@@ -83,18 +83,18 @@ A = Constant(2.0e-25 * yearinsec * 1.0e18)
 #alpha = np.deg2rad(0.5)
 omega = 2.0*np.pi / Lx
 #tan_alpha = np.tan(alpha)
-psi = np.deg2rad(3.0)
+psi = np.deg2rad(2.0)
 g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)
 rhow = 1028.0/(1.0e6*yearinsec**2)
 
-zs = Function(Vbar, name="zs").interpolate(500.0 * sin(omega * xref))
+#zs = Function(Vbar, name="zs").interpolate(500.0 * sin(omega * xref))
 #zs = Function(Vbar, name="zs").interpolate(0.0)
-zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * xref))
+#zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * xref))
 
-thick = Function(Vbar, name="thick").interpolate(zs - zb)
+#thick = Function(Vbar, name="thick").interpolate(zs - zb)
 
-mesh.coordinates.interpolate(as_vector([xref, zb + sigmaref * thick]))
+#mesh.coordinates.interpolate(as_vector([xref, zb + sigmaref * thick]))
 eps = Constant(1e-6) # Constant(1e-10)
 
 def viscosity(u, n=3):
@@ -112,15 +112,18 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*pi*xref/Lx)))
 a_s = Constant(0.0)
 a_b = Constant(0.0)
 
-dts = [0.01]
-theta_outs = [0]
+dts = [50]
+theta_outs = [1, 0]
 
 zeta = Constant(0.0)
-T = 10.0
+T = 100
 time_stepping = "im"
 
 for dt in dts:
     for theta_out in theta_outs:
+
+        if dt == 0.01 and theta_out == 1:
+            continue
 
         print("=" * 80)
         print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
@@ -131,9 +134,9 @@ for dt in dts:
         theta = Constant(theta_out)
         num_TS = int(T / dt)
 
-        zs.interpolate(0.0)
-        zb.interpolate(- 1000.0 + 500.0 * sin(omega * xref))
-        thick.interpolate(zs - zb)
+        zs = Function(Vbar, name="zs").interpolate(500.0 * sin(omega * xref))
+        zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * xref))
+        thick = Function(Vbar, name="thick").interpolate(zs - zb)
         mesh.coordinates.interpolate(as_vector([xref, zb + sigmaref * thick]))
 
         u_init = 10.0 * (1.0 + 0.01 * sin(2.0*pi*xref/Lx))
@@ -189,23 +192,23 @@ for dt in dts:
 
                 if theta_out != 0:
 
-                    F += theta * rhoi * g * np.cos(psi) * dt * q * v.dx(0) * dx
-                    F -= theta * rhoi * g * np.cos(psi) * dt * a_s * v.dx(0) * dx
+                    F += theta * rhoi * g * cos(psi) * dt * q * v.dx(0) * dx
+                    F -= theta * rhoi * g * cos(psi) * dt * a_s * v.dx(0) * dx
                     
-                    F += theta * rhoi * g * np.cos(psi) * dt * nz_s * q * v * zs.dx(0) * ds_t
-                    F -= theta * rhoi * g * np.cos(psi) * dt * nz_s * a_s * v * zs.dx(0) * ds_t
+                    F += theta * rhoi * g * cos(psi) * dt * nz_s * q * v * zs.dx(0) * ds_t
+                    F -= theta * rhoi * g * cos(psi) * dt * nz_s * a_s * v * zs.dx(0) * ds_t
 
-                    F += theta * rhoi * g * np.cos(psi) * dt * nz_b * q * v * zb.dx(0) * ds_b
-                    F -= theta * rhoi * g * np.cos(psi) * dt * nz_b * a_s * v * zb.dx(0) * ds_b
+                    F += theta * rhoi * g * cos(psi) * dt * nz_b * q * v * zb.dx(0) * ds_b
+                    F -= theta * rhoi * g * cos(psi) * dt * nz_b * a_s * v * zb.dx(0) * ds_b
 
                     # Constraint for q
                     F += r * q * dx - r * thick * u.dx(0) * dx
 
-                F -= rhoi * g * np.cos(psi) * zs * v.dx(0) * dx
-                F += rhoi * g * np.sin(psi) * v * dx
+                F -= rhoi * g * cos(psi) * zs * v.dx(0) * dx
+                F += rhoi * g * sin(psi) * v * dx
                 
-                F -= rhoi * g * np.cos(psi) * nz_s * zs * v * zs.dx(0) * ds_t
-                F -= rhoi * g * np.cos(psi) * nz_b * zs * v * zb.dx(0) * ds_b
+                F -= rhoi * g * cos(psi) * nz_s * zs * v * zs.dx(0) * ds_t
+                F -= rhoi * g * cos(psi) * nz_b * zs * v * zb.dx(0) * ds_b
 
                 if theta_out == 0:
                     J = derivative(F, u_solve, du)

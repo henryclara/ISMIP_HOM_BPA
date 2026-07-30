@@ -37,8 +37,8 @@ def save_restart(filename, mesh, w, u_out, thick, zs, zb, t, dt, nx, nz, time_st
         afile.h5pyfile.attrs["time_stepping"] = time_stepping
 
 Lx = 80000.0
-nx = 100
-nz = 10
+nx = 1600
+nz = 160
 
 base = PeriodicIntervalMesh(nx, Lx)
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -88,13 +88,6 @@ g = 9.8*yearinsec**2
 rhoi = 917.0/(1.0e6*yearinsec**2)
 rhow = 1028.0/(1.0e6*yearinsec**2)
 
-#zs = Function(Vbar, name="zs").interpolate(500.0 * sin(omega * xref))
-#zs = Function(Vbar, name="zs").interpolate(0.0)
-#zb = Function(Vbar, name="zb").interpolate(- 1000.0 + 500.0 * sin(omega * xref))
-
-#thick = Function(Vbar, name="thick").interpolate(zs - zb)
-
-#mesh.coordinates.interpolate(as_vector([xref, zb + sigmaref * thick]))
 eps = Constant(1e-6) # Constant(1e-10)
 
 def viscosity(u, n=3):
@@ -103,7 +96,7 @@ def viscosity(u, n=3):
     return mu
 
 mu = 1
-ns = [3] #np.linspace(1, 3, 11)
+ns = [3]
 
 # Basal friction field
 beta2 = Function(Vbar, name="beta2")
@@ -112,12 +105,12 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*pi*xref/Lx)))
 a_s = Constant(0.0)
 a_b = Constant(0.0)
 
-dts = [50]
-theta_outs = [1, 0]
+dts = [1, 0.1]
+theta_outs = [0.5]
 
 zeta = Constant(0.0)
 T = 100
-time_stepping = "im"
+time_stepping = "im_mi"
 
 for dt in dts:
     for theta_out in theta_outs:

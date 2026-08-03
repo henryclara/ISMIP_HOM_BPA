@@ -5,10 +5,11 @@ from config import *
 
 
 def mismip_bed(x, y):
-    # Freeze the transverse coordinate to the requested 2D vertical slice at y = 40000.
-    # Because the mesh is shifted by Ly_full/2 in the domain setup, the corresponding
-    # centered coordinate is yc = 40000 - 40000 = 0.
-    yc = 40000.0 - Ly_full / 2.0
+    # Keep the 2D simulation on the requested fixed horizontal cross-section.
+    # The desired slice is the y = 60000 line, so the bed is frozen in y and
+    # retains the natural x dependence on that plane.
+    slice_y = 60000.0
+    yc = slice_y - Ly_full / 2.0
     X = x / xbar
 
     Bx = B0 + B2 * X**2 + B4 * X**4 + B6 * X**6
@@ -18,16 +19,16 @@ def mismip_bed(x, y):
     return max_value(Bx + By, zdeep)
 
 def reset_state():
-    from domain import x, y
+    from domain import x
     from fields import bed, zb, thick, zs
-    from spaces import mesh3D, xref, yref, sigmaref, w, uvec_out, H, u_prev
+    from spaces import mesh3D, xref, sigmaref, w, uvec_out, H, u_prev
 
     zb.interpolate(max_value(-90.0, bed))
     thick.interpolate(100.0)
     zs.interpolate(zb + thick)
 
     mesh3D.coordinates.interpolate(
-        as_vector([xref, yref, zb + sigmaref * thick])
+        as_vector([xref, zb + sigmaref * thick])
     )
 
     w.assign(0.0)
@@ -35,17 +36,9 @@ def reset_state():
     H.assign(0.0)
     u_prev.assign(0.0)
 
-    # Keep the diagnostics on the vertical slice only: the cross-slope variable is frozen,
-    # so the initial condition is now a true x-z slice rather than a full x-y sheet.
-    u_init = as_vector([
-        10.0 * (1.0 + 0.01 * sin(2.0 * pi * x / Lx)),
-        0.0,
-    ])
+    u_init = 10.0 * (1.0 + 0.01 * sin(2.0 * pi * x / Lx))
 
     w.sub(0).interpolate(u_init)
-    w.sub(1).interpolate(u_init)
-    w.sub(2).interpolate(u_init)
 
     u0 = w.sub(0)
-    ux0, uy0 = split(u0)
-    w.sub(3).project(thick * (ux0.dx(0) + uy0.dx(1)))
+    w.sub(2).project(thick * u0.dx(0))

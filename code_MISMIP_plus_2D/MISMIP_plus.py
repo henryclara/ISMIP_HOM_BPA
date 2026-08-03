@@ -47,39 +47,30 @@ for dt in dts:
         outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}.pvd")
 
         if theta_out == 0:
-            uvec = Function(VV)
-            uvec.assign(w.sub(0))
+            u = Function(V)
+            u.assign(w.sub(0))
+            u_s = u
+            u_b = u
+            q = Function(Vbar, name="q")
+            q.assign(0.0)
 
-            ux, uy = split(uvec)
-
-            du = TrialFunction(VV)
-            vvect = TestFunction(VV)
-            v1, v2 = split(vvect)
+            du = TrialFunction(V)
+            v = TestFunction(V)
 
         else:
-            uvec, u_s, u_b, q = split(w)
-            ux, uy = split(uvec)
-            ux_s, uy_s = split(u_s)
-            ux_b, uy_b = split(u_b)
+            u, u_s, u_b, q = split(w)
 
             dw = TrialFunction(W)
-            vvect, eta, xi, r = TestFunctions(W)
-            v1, v2 = split(vvect)
+            v, eta, xi, r = TestFunctions(W)
 
         for i in range(start_step, num_TS):
             print("Solving momentum")
 
-            mu = viscosity(ux, uy, 3.0)
+            mu = viscosity(u, 3.0)
 
             surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
 
-            F = (4 * mu * ux.dx(0) + 2 * mu * uy.dx(1)) * v1.dx(0) * dx \
-                            + (mu * ux.dx(1) + mu * uy.dx(0)) * v1.dx(1) * dx \
-                            + mu * ux.dx(2) * v1.dx(2) * dx
-                        
-            F += (4 * mu * uy.dx(1) + 2 * mu * ux.dx(0)) * v2.dx(1) * dx \
-                            + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
-                            + mu * uy.dx(2) * v2.dx(2) * dx
+            F = (4 * mu * u.dx(0)) * v.dx(0) * dx + mu * u.dx(1) * v.dx(1) * dx
 
             phi_float = bed + (rhoi/rhow) * thick
             delta_GL = Constant(0.01)
@@ -87,50 +78,45 @@ for dt in dts:
 
             n = FacetNormal(mesh3D)
 
-            F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
+            F -= rhoi * g * zs * v.dx(0) * dx
 
             if zeta_pred == False:
                 zeta.interpolate(0.5 * (1.0 - tanh(phi_float / delta_GL)))
 
             elif zeta_pred == True:
-                H_k_plus_1 = thick - dt * (
-                    q
-                    + (ux_s * zs.dx(0) + uy_s * zs.dx(1))
-                    - (ux_b * zb.dx(0) + uy_b * zb.dx(1))
-                    - a_s + a_b
-                )
+                H_k_plus_1 = thick - dt * (q + (u * zs.dx(0)) - (u * zb.dx(0)) - a_s + a_b)
                 phi_pred = bed + (rhoi/rhow) * H_k_plus_1
                 zeta.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
                 
             zeta_predicted.assign(zeta)
 
             m = Constant(3.0)
-            C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
-            F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
+            C = beta2 * sqrt(u**2 + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
+            F += (1 - zeta) * C * u * v * ds_b
 
             if theta_out != 0 and FSSA_keyword == "full":
                 
                 # First line (excluding first term)
-                F += theta * rhoi * g * dt * ((1 - zeta * rhoi/rhow) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q - a_s)- (1 + zeta * rhoi/rhow) * a_b) * (v1.dx(0) + v2.dx(1)) * dx
-                
+                F += theta * rhoi * g * dt * ((1 - zeta * rhoi/rhow) * (u_s * zs.dx(0) - u_b * zb.dx(0) + q - a_s) - (1 + zeta * rhoi/rhow) * a_b) * v.dx(0) * dx
+
                 # Second line
-                F += theta * rhoi * g * dt * n[2] * zs * ((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
-                
+                F += theta * rhoi * g * dt * n[2] * zs * ((1 - zeta * (rhoi/rhow)) * (u_s * zs.dx(0) - u_b * zb.dx(0) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * v.dx(0) * ds_t
+
                 # Third line
-                F += theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
+                F += theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((u_s * zs.dx(0)) - (u_b * zb.dx(0)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * v.dx(0) * ds_b
 
                 # Fourth line
-                F -= theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t 
-                F += theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
-                
+                F -= theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v) * ds_t
+                F += theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v) * ds_b
+
                 # The constraints:
-                F += dot(u_s - uvec, eta) * ds_t
-                F += dot(u_b - uvec, xi) * ds_b
-                F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
+                F += (u_s - u) * eta * ds_t
+                F += (u_b - u) * xi * ds_b
+                F += r * q * dx - r * thick * u.dx(0) * dx
 
             if theta_out == 0:
-                J = derivative(F, uvec, du)
-                problem = NonlinearVariationalProblem(F, uvec, bcs=bcs_u, J=J)
+                J = derivative(F, u, du)
+                problem = NonlinearVariationalProblem(F, u, bcs=bcs_u, J=J)
             else:
                 J = derivative(F, w, dw)
                 problem = NonlinearVariationalProblem(F, w, bcs=bcs_w, J=J)
@@ -157,7 +143,7 @@ for dt in dts:
 
             solver.solve()
             if theta_out == 0:
-                uvec_out.assign(uvec)
+                uvec_out.assign(u)
                 w.sub(0).assign(uvec_out)
             else:
                 uvec_out.assign(w.sub(0))
@@ -166,12 +152,11 @@ for dt in dts:
 
             print("Solving thickness evolution now...")
 
-            ubar = Function(VVbar, name="u_bar")
-            ubar.project(uvec_out)  # testing this without the BCs. Older version:    ubar.project(uvec_out, bcs=bcs_ubar)
-            ux_bar, uy_bar = split(ubar)
+            ubar = Function(Vbar, name="u_bar")
+            ubar.project(uvec_out)
+            ux_bar = ubar
 
-            vel = as_vector([ux_bar, uy_bar])
-            vnorm = sqrt(dot(vel, vel) + 1e-10)
+            vnorm = sqrt(ux_bar**2 + 1e-10)
             h = CellDiameter(mesh3D)
             mu_art = 0.1 * h * vnorm
 
@@ -179,7 +164,6 @@ for dt in dts:
                 thick_new * phi * dx \
                 - thick * phi * dx \
                 + dt * (ux_bar * thick_new).dx(0) * phi * dx
-                + dt * (uy_bar * thick_new).dx(1) * phi * dx
                 - dt * (a_s - a_b) * phi * dx
                 # Artifical viscosity
                 + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
@@ -222,12 +206,12 @@ for dt in dts:
                 t = t_restart + (i - start_step + 1) * dt
 
             if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
-                ux_out, uy_out = split(uvec_out)
-                ux_s, uy_s = split(u_s)
-                ux_b, uy_b = split(u_b)
-                uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
-                usout.interpolate(as_vector([ux_s, uy_s, 0.0]))
-                ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))
+                ux_out = uvec_out
+                ux_s = u_s
+                ux_b = u_b
+                uout.interpolate(as_vector([ux_out, 0.0]))
+                usout.interpolate(as_vector([ux_s, 0.0]))
+                ubout.interpolate(as_vector([ux_b, 0.0]))
                 zeta_out.interpolate(zeta)
                 outfile.write(uout, usout, ubout, thick, zs, zb, bed, zeta_out, zeta_predicted, time=t)
                 restart_dir = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
@@ -237,4 +221,3 @@ for dt in dts:
 
         simulation_end = datetime.now()
         print(f"Simulation time: {simulation_end - simulation_start}")
-        

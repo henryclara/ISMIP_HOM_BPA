@@ -10,7 +10,7 @@ ny = int(40/4)
 nz = int(10/2)
 
 dts = [10]
-theta_outs = [1]
+theta_outs = [0]
 FSSA_keyword = "full"
 T = 100.0
 

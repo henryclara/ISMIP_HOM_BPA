@@ -1,21 +1,25 @@
 from firedrake import *
+import numpy as np
 
 Lx = 640000.0
-Lz = 1000.0
+Ly_full = 80000.0
+Ly = Ly_full / 2.0
 
-nx = 60
-nz = 20
+nx = int(640/4)
+ny = int(40/4)
+nz = int(10/2)
 
-dts = [10.0]
-theta_outs = [0]
-FSSA_keyword = "none"
-T = 20.0
+dts = [10]
+theta_outs = [1]
+FSSA_keyword = "full"
+T = 100.0
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(20.0)
-g = 9.8 * yearinsec**2
-rhoi = 917.0 / (1.0e6 * yearinsec**2)
-rhow = 1028.0 / (1.0e6 * yearinsec**2)
+#omega = 2.0*np.pi / Lx
+g = 9.8*yearinsec**2
+rhoi = 917.0/(1.0e6*yearinsec**2)
+rhow = 1028.0/(1.0e6*yearinsec**2)
 
 xbar = Constant(300000.0)
 B0 = Constant(-150.0)
@@ -34,4 +38,4 @@ a_b = Constant(0.0)
 n = 3.0
 
 eps_H = 100.0
-zeta_pred = False
+zeta_pred = True

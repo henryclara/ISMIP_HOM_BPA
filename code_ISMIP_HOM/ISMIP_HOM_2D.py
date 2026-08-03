@@ -37,8 +37,8 @@ def save_restart(filename, mesh, w, u_out, thick, zs, zb, t, dt, nx, nz, time_st
         afile.h5pyfile.attrs["time_stepping"] = time_stepping
 
 Lx = 80000.0
-nx = 1600
-nz = 160
+nx = 3200
+nz = 320
 
 base = PeriodicIntervalMesh(nx, Lx)
 mesh = ExtrudedMesh(base, layers=nz, layer_height=1.0 / nz)
@@ -105,7 +105,7 @@ beta2.interpolate(1000.0 * (1.0 + sin(2.0*pi*xref/Lx)))
 a_s = Constant(0.0)
 a_b = Constant(0.0)
 
-dts = [1, 0.1]
+dts = [0.1, 1, 2, 5, 10, 20, 50]
 theta_outs = [0.5]
 
 zeta = Constant(0.0)

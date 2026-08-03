@@ -371,7 +371,7 @@ legend_theta = fig.legend(
     loc="lower left",
     bbox_to_anchor=(0.08, 0.01),
     ncols=3,
-    fontsize=12,
+    fontsize=10,
     frameon=True,
 )
 
@@ -380,7 +380,7 @@ legend_dt = fig.legend(
     loc="lower right",
     bbox_to_anchor=(0.92, 0.01),
     ncols=4,
-    fontsize=12,
+    fontsize=10,
     frameon=True,
 )
 

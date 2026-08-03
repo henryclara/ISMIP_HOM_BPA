@@ -16,10 +16,10 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes, mark_inset
 
 T = 100
 
-dts = [0.1, 1, 2, 5, 10, 20, 50]
+dts = [0.1, 2, 10, 50]
 
 # Compare only theta = 0.5 and theta = 1
-theta_values = [0.5, 1]
+theta_values = [1, 0.5, 0]
 
 # High-resolution-in-time reference simulation
 ref_dt = 0.01
@@ -31,8 +31,8 @@ resolution_pairs = [
     (400, 40),
     (800, 80),
     (1600, 160),
+    (3200, 320),
 ]
-
 
 # ---------------------------------------------------------------------
 # Plot styling
@@ -40,20 +40,13 @@ resolution_pairs = [
 
 # Colour represents theta
 theta_colors = {
-    0.5: plt.cm.viridis(0.1),
-    1: plt.cm.viridis(0.8),
+    1: plt.cm.viridis(0.1),
+    0.5: plt.cm.viridis(0.5),
+    0: plt.cm.viridis(0.8),
 }
 
 # Linestyle represents timestep size
-dt_styles = {
-    0.1: "-",
-    1: "--",
-    2: ":",
-    5: "-.",
-    10: (0, (5, 2)),
-    20: (0, (3, 1, 1, 1)),
-    50: (0, (1, 1)),
-}
+dt_styles = {0.1: "-",2: "--",10: "-.",50: ":"}
 
 # Font sizes
 axis_label_fontsize = 20
@@ -61,7 +54,6 @@ title_fontsize = 20
 tick_fontsize = 15
 inset_tick_fontsize = 9
 legend_fontsize = 12
-
 
 # ---------------------------------------------------------------------
 # Load restart data
@@ -238,17 +230,17 @@ for panel_index, (nx, nz) in enumerate(resolution_pairs):
         "zorder": 20,
     }
 
-    ax.plot(
-        x_ref,
-        H_ref,
-        **reference_options,
-    )
+    #ax.plot(
+    #    x_ref,
+    #    H_ref,
+    #    **reference_options,
+    #)
 
-    ax_zoom.plot(
-        x_ref,
-        H_ref,
-        **reference_options,
-    )
+    #ax_zoom.plot(
+    #    x_ref,
+    #    H_ref,
+    #    **reference_options,
+    #)
 
     # -------------------------------------------------------------
     # Finite-timestep simulations
@@ -372,17 +364,17 @@ fig.supylabel(
 # Legends
 # ---------------------------------------------------------------------
 
-reference_handle = Line2D(
-    [0],
-    [0],
-    color="black",
-    linestyle="-",
-    linewidth=2.2,
-    label=(
-        fr"Reference: $\Delta t={ref_dt:g}$, "
-        fr"$\theta={ref_theta:g}$"
-    ),
-)
+#reference_handle = Line2D(
+#    [0],
+#    [0],
+#    color="black",
+#    linestyle="-",
+#    linewidth=2.2,
+#    label=(
+#        fr"Reference: $\Delta t={ref_dt:g}$, "
+#        fr"$\theta={ref_theta:g}$"
+#    ),
+#)
 
 # Colour legend for theta
 theta_handles = [
@@ -411,7 +403,7 @@ dt_handles = [
 ]
 
 legend_theta = fig.legend(
-    handles=[reference_handle] + theta_handles,
+    handles=theta_handles,
     loc="lower left",
     bbox_to_anchor=(0.06, 0.005),
     ncols=3,

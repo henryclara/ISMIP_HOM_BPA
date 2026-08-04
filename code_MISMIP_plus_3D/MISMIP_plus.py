@@ -20,6 +20,7 @@ from io_local import *
 
 Q1 = FunctionSpace(mesh3D, "CG", 1)
 zeta = Function(Q1, name="zeta")
+zeta_im = Function(Q1, name="zeta")
 zeta_out = Function(Q1, name="zeta_out")
 zeta_predicted = Function(Q1, name="zeta_predicted")
 
@@ -58,12 +59,13 @@ for dt in dts:
 
         else:
             uvec, q = split(w)
+
             ux, uy = split(uvec)
-            #ux_s, uy_s = split(u_s)
-            #ux_b, uy_b = split(u_b)
+            q1, q2 = split(q)
 
             dw = TrialFunction(W)
-            vvect, eta, xi, r = TestFunctions(W)
+
+            vvect, r = TestFunctions(W)
             v1, v2 = split(vvect)
 
         for i in range(start_step, num_TS):
@@ -89,56 +91,44 @@ for dt in dts:
 
             F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
 
-            if zeta_pred == False:
-                zeta.interpolate(0.5 * (1.0 - tanh(phi_float / delta_GL)))
+            eps_H = Constant(1.0e-10)
 
-            elif zeta_pred == True:
-                H_k_plus_1 = thick - dt * (
-                    q
-                    + (ux_s * zs.dx(0) + uy_s * zs.dx(1))
-                    - (ux_b * zb.dx(0) + uy_b * zb.dx(1))
-                    - a_s + a_b
-                )
+            p_W = rhow * g * max_value(0.0, thick - zs)
+            p_I = rhoi * g * max_value(thick, eps_H)
+
+            zeta.interpolate(min_value(1.0, max_value(0.0, p_W / p_I)))
+
+            if zeta_pred == True:
+                H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b)
                 phi_pred = bed + (rhoi/rhow) * H_k_plus_1
-                zeta.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
+                zeta_im.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
                 
-            zeta_predicted.assign(zeta)
+            zeta_predicted.assign(zeta_im)
 
             m = Constant(3.0)
+
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
-            F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
+
+            if zeta_pred == True:
+                F += (1 - zeta_im) * C * dot(uvec, vvect) * ds_b
+
+            elif zeta_pred == False:
+                F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
+
             gamma = rhoi * g * (1 - (rhoi/rhow))
             gdash = rhoi * g
 
             if theta_out != 0 and FSSA_keyword == "full":
                 # First line (excluding first term)
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * (q.dx(0) + q.dx(1) + a_s - zeta * a_b) * (v1.dx(0) + v2.dx(1)) * dx
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1.dx(0) + v2.dx(1)) * dx
 
                 # Second line
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (q.dx(0) + q.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
 
                 # Third line
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (q.dx(0) + q.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_b
-
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zb.dx(1)) * ds_b
                 
-                
-                # First line (excluding first term)
-                #F += theta * rhoi * g * dt * ((1 - zeta * rhoi/rhow) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q - a_s)- (1 + zeta * rhoi/rhow) * a_b) * (v1.dx(0) + v2.dx(1)) * dx
-                
-                # Second line
-                #F += theta * rhoi * g * dt * n[2] * zs * ((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
-                
-                # Third line
-                #F += theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
-
-                # Fourth line
-                #F -= theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t 
-                #F += theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
-                
-                # The constraints:
-                #F += dot(u_s - uvec, eta) * ds_t
-                #F += dot(u_b - uvec, xi) * ds_b
-                F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
+                F += dot(q - thick * uvec, r) * dx
 
             if theta_out == 0:
                 J = derivative(F, uvec, du)
@@ -179,13 +169,19 @@ for dt in dts:
             print("Solving thickness evolution now...")
 
             ubar = Function(VVbar, name="u_bar")
-            ubar.project(uvec_out)  # testing this without the BCs. Older version:    ubar.project(uvec_out, bcs=bcs_ubar)
+            ubar.project(uvec_out)
             ux_bar, uy_bar = split(ubar)
 
             vel = as_vector([ux_bar, uy_bar])
             vnorm = sqrt(dot(vel, vel) + 1e-10)
             h = CellDiameter(mesh3D)
             mu_art = 0.1 * h * vnorm
+
+            z_ref = Function(Q1, name="z_ref")
+            z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
+
+            sigma_ref = Function(Q1, name="sigma_ref")
+            sigma_ref.interpolate((z_ref - zb) / thick)
 
             F = (
                 thick_new * phi * dx \
@@ -203,12 +199,6 @@ for dt in dts:
             solve(lhs(F) == rhs(F), H)
             thick.assign(H)
             thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
-
-            z_ref = Function(Q1, name="z_ref")
-            z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
-
-            sigma_ref = Function(Q1, name="sigma_ref")
-            sigma_ref.interpolate((z_ref - zb) / thick)
 
             #sigma = sigmaref
 
@@ -238,10 +228,10 @@ for dt in dts:
                 #ux_s, uy_s = split(u_s)
                 #ux_b, uy_b = split(u_b)
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
-                usout.interpolate(as_vector([ux_s, uy_s, 0.0]))
-                ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))
+                #usout.interpolate(as_vector([ux_s, uy_s, 0.0]))
+                #ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))
                 zeta_out.interpolate(zeta)
-                outfile.write(uout, usout, ubout, thick, zs, zb, bed, zeta_out, zeta_predicted, time=t)
+                outfile.write(uout, thick, zs, zb, bed, zeta_out, zeta_predicted, time=t)
                 restart_dir = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
                 os.makedirs(restart_dir, exist_ok=True)
                 restart_file = f"{restart_dir}/restart_t{t:g}.h5"

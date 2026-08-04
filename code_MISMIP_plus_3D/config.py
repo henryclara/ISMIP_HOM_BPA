@@ -12,7 +12,7 @@ nz = int(10/2)
 dts = [10]
 theta_outs = [1]
 FSSA_keyword = "full"
-T = 100.0
+T = 10000.0
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(20.0)

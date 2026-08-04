@@ -18,9 +18,9 @@ bcs_w = [
     DirichletBC(W.sub(0).sub(1), 0.0, 4),
 
     # u_s side impenetrability
-    DirichletBC(W.sub(1).sub(0), 0.0, 1),
-    DirichletBC(W.sub(1).sub(1), 0.0, 3),
-    DirichletBC(W.sub(1).sub(1), 0.0, 4),
+    #DirichletBC(W.sub(1).sub(0), 0.0, 1),
+    #DirichletBC(W.sub(1).sub(1), 0.0, 3),
+    #DirichletBC(W.sub(1).sub(1), 0.0, 4),
 ]
 
 bcs_ubar = [

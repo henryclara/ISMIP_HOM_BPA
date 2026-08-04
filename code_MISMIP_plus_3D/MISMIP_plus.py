@@ -57,10 +57,10 @@ for dt in dts:
             v1, v2 = split(vvect)
 
         else:
-            uvec, u_s, u_b, q = split(w)
+            uvec, q = split(w)
             ux, uy = split(uvec)
-            ux_s, uy_s = split(u_s)
-            ux_b, uy_b = split(u_b)
+            #ux_s, uy_s = split(u_s)
+            #ux_b, uy_b = split(u_b)
 
             dw = TrialFunction(W)
             vvect, eta, xi, r = TestFunctions(W)
@@ -107,25 +107,37 @@ for dt in dts:
             m = Constant(3.0)
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
             F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
+            gamma = rhoi * g * (1 - (rhoi/rhow))
+            gdash = rhoi * g
 
             if theta_out != 0 and FSSA_keyword == "full":
+                # First line (excluding first term)
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * (q.dx(0) + q.dx(1) + a_s - zeta * a_b) * (v1.dx(0) + v2.dx(1)) * dx
+
+                # Second line
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (q.dx(0) + q.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
+
+                # Third line
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (q.dx(0) + q.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_b
+
+                
                 
                 # First line (excluding first term)
-                F += theta * rhoi * g * dt * ((1 - zeta * rhoi/rhow) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q - a_s)- (1 + zeta * rhoi/rhow) * a_b) * (v1.dx(0) + v2.dx(1)) * dx
+                #F += theta * rhoi * g * dt * ((1 - zeta * rhoi/rhow) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q - a_s)- (1 + zeta * rhoi/rhow) * a_b) * (v1.dx(0) + v2.dx(1)) * dx
                 
                 # Second line
-                F += theta * rhoi * g * dt * n[2] * zs * ((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
+                #F += theta * rhoi * g * dt * n[2] * zs * ((1 - zeta * (rhoi/rhow)) * (ux_s * zs.dx(0) + uy_s * zs.dx(1) - ux_b * zb.dx(0) - uy_b * zb.dx(1) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_t
                 
                 # Third line
-                F += theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
+                #F += theta * rhoi * g * dt * n[2] * zs * (- zeta * (rhoi/rhow) * ((ux_s * zs.dx(0) + uy_s * zs.dx(1)) - (ux_b * zb.dx(0) + uy_b * zb.dx(1)) + q) + zeta * (rhoi/rhow) * (a_s - a_b) - a_b) * (v1.dx(0) + v2.dx(1)) * ds_b
 
                 # Fourth line
-                F -= theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t 
-                F += theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
+                #F -= theta * dt * rhoi * g * a_s * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2) * ds_t 
+                #F += theta * zeta * dt * rhoi * g * a_b * n[2] * (zs.dx(0) * v1 + zs.dx(1) * v2)* ds_b
                 
                 # The constraints:
-                F += dot(u_s - uvec, eta) * ds_t
-                F += dot(u_b - uvec, xi) * ds_b
+                #F += dot(u_s - uvec, eta) * ds_t
+                #F += dot(u_b - uvec, xi) * ds_b
                 F += r * q * dx - r * thick * (ux.dx(0) + uy.dx(1)) * dx
 
             if theta_out == 0:
@@ -223,8 +235,8 @@ for dt in dts:
 
             if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
                 ux_out, uy_out = split(uvec_out)
-                ux_s, uy_s = split(u_s)
-                ux_b, uy_b = split(u_b)
+                #ux_s, uy_s = split(u_s)
+                #ux_b, uy_b = split(u_b)
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
                 usout.interpolate(as_vector([ux_s, uy_s, 0.0]))
                 ubout.interpolate(as_vector([ux_b, uy_b, 0.0]))

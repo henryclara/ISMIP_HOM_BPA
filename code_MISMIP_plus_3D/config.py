@@ -9,11 +9,11 @@ nx = int(640/8)
 ny = int(40/8)
 nz = int(10/2)
 
-dts = [1]
-theta_outs = [0]
+dts = [50, 20, 10, 5, 2, 1, 0.1]
+theta_outs = [1, 0]
 FSSA_keyword = "full"
 zeta_pred = False
-T = 10000.0
+T = 10500
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(20.0)

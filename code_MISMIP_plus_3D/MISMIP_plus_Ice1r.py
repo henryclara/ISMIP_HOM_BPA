@@ -5,27 +5,27 @@ import os
 from config import *
 from datetime import datetime
 
-start_step = 0
-restart_from = None #f"Simulations/MISMIP_output_theta1_dt10/restart_t{start_step}.h5"
-if restart_from is not None:
-    os.environ["RESTART_MESH_FILE"] = restart_from
-
-from domain import *
-from fields import *
-from physics import *
-from geometry import *
-from spaces import *
-from bcs import *
-from io_local import *
-
-Q1 = FunctionSpace(mesh3D, "CG", 1)
-zeta = Function(Q1, name="zeta")
-zeta_im = Function(Q1, name="zeta")
-zeta_out = Function(Q1, name="zeta_out")
-zeta_predicted = Function(Q1, name="zeta_predicted")
-
 for dt in dts:
     for theta_out in theta_outs:
+
+        start_step = 0
+        restart_from = f"Simulations/MISMIP_output_theta1_dt10_GL_predFalse/restart_t10000.h5" # Change to whatever is correct
+        if restart_from is not None:
+            os.environ["RESTART_MESH_FILE"] = restart_from
+
+        from domain import *
+        from fields import *
+        from physics import *
+        from geometry import *
+        from spaces import *
+        from bcs import *
+        from io_local import *
+
+        Q1 = FunctionSpace(mesh3D, "CG", 1)
+        zeta = Function(Q1, name="zeta")
+        zeta_im = Function(Q1, name="zeta")
+        zeta_out = Function(Q1, name="zeta_out")
+        zeta_predicted = Function(Q1, name="zeta_predicted")
 
         simulation_start = datetime.now()
 
@@ -44,8 +44,7 @@ for dt in dts:
 
         theta = Constant(theta_out)
         num_TS = int(T / dt)
-
-        outfile = VTKFile(f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}.pvd")
+        outfile = VTKFile(f"Simulations/MISMIP_Ice1r_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}.pvd")
 
         if theta_out == 0:
             uvec = Function(VV)
@@ -73,6 +72,11 @@ for dt in dts:
 
             mu = viscosity(ux, uy, 3.0)
 
+            cavity_thickness = max_value(zb - bed, 0.0)
+
+            a_b_Ice1r = (Constant(0.2) * tanh(cavity_thickness / Constant(75.0)) \
+                                    * max_value(-Constant(100.0) - zb, Constant(0.0)))
+
             surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
 
             F = (4 * mu * ux.dx(0) + 2 * mu * uy.dx(1)) * v1.dx(0) * dx \
@@ -99,7 +103,7 @@ for dt in dts:
             zeta.interpolate(min_value(1.0, max_value(0.0, p_W / p_I)))
 
             if zeta_pred == True:
-                H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b)
+                H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b_Ice1r)
                 phi_pred = bed + (rhoi/rhow) * H_k_plus_1
                 zeta_im.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
                 
@@ -120,13 +124,13 @@ for dt in dts:
 
             if theta_out != 0 and FSSA_keyword == "full":
                 # First line (excluding first term)
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1.dx(0) + v2.dx(1)) * dx
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1.dx(0) + v2.dx(1)) * dx
 
                 # Second line
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
 
                 # Third line
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zb.dx(1)) * ds_b
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zs.dx(0) + v2 * zb.dx(1)) * ds_b
                 
                 F += dot(q - thick * uvec, r) * dx
 
@@ -188,7 +192,7 @@ for dt in dts:
                 - thick * phi * dx \
                 + dt * (ux_bar * thick_new).dx(0) * phi * dx
                 + dt * (uy_bar * thick_new).dx(1) * phi * dx
-                - dt * (a_s - a_b) * phi * dx
+                - dt * (a_s - a_b_Ice1r) * phi * dx
                 # Artifical viscosity
                 + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
             )
@@ -225,11 +229,10 @@ for dt in dts:
                 uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
                 zeta_out.interpolate(zeta)
                 outfile.write(uout, thick, zs, zb, bed, zeta_out, zeta_predicted, time=t)
-                restart_dir = f"Simulations/MISMIP_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
+                restart_dir = f"Simulations/MISMIP_Ice1r_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
                 os.makedirs(restart_dir, exist_ok=True)
                 restart_file = f"{restart_dir}/restart_t{t:g}.h5"
                 save_restart(restart_file, t, i+1, dt, theta_out)
 
         simulation_end = datetime.now()
         print(f"Simulation time: {simulation_end - simulation_start}")
-        

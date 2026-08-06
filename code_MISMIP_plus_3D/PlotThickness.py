@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 from matplotlib.lines import Line2D
+from matplotlib.colors import LinearSegmentedColormap
 
 
 # ---------------------------------------------------------------------
@@ -29,6 +30,42 @@ number_of_contour_levels = 10
 plot_contour_lines = True
 figure_dpi = 700
 
+
+def truncate_colormap(cmap_name, minimum, maximum, name):
+    """Return a colormap containing only part of a Matplotlib colormap."""
+
+    base_cmap = plt.get_cmap(cmap_name)
+    colors = base_cmap(
+        np.linspace(
+            minimum,
+            maximum,
+            256,
+        )
+    )
+
+    return LinearSegmentedColormap.from_list(
+        name,
+        colors,
+    )
+
+
+# Split Spectral into two complementary halves.
+# Lower half: red/orange through pale yellow.
+# Upper half: pale yellow through green/blue.
+spectral_lower = truncate_colormap(
+    "Spectral_r",
+    0.6,
+    1.0,
+    "Spectral_lower_half",
+)
+
+spectral_upper = truncate_colormap(
+    "Spectral",
+    0.6,
+    1.0,
+    "Spectral_upper_half",
+)
+
 # Nodes for which the hydrostatic flotation difference is larger than
 # this tolerance are treated as grounded. The difference is
 #
@@ -40,7 +77,7 @@ grounding_line_tolerance = 0.1
 # Only the density ratio is needed for the flotation criterion.
 rhoi = 917.0
 rhow = 1028.0
-grounding_line_color = "cyan"
+grounding_line_color = "black"
 grounding_line_width = 2.2
 
 
@@ -275,24 +312,30 @@ def thickness_surface(H):
 
 
 # ---------------------------------------------------------------------
-# Extract grounding-line indicator from hydrostatic equilibrium
+# Extract the grounding-line curve from hydrostatic equilibrium
 # ---------------------------------------------------------------------
 
-def grounding_line_surface(H, zb):
+def grounding_line_curve(H, zb):
     """
-    Return a horizontal grounded/floating indicator.
+    Extract an explicit grounding-line curve x_GL(y).
 
-    The model defines the freely floating ice base as
+    The hydrostatic flotation difference is
 
-        zb_float = -(rho_i / rho_w) * H.
+        D = zb + (rho_i / rho_w) * H.
 
-    Therefore, the hydrostatic flotation difference is
+    Floating ice has D approximately zero, while grounded ice has
+    D greater than zero. For each horizontal y-row, this function finds
+    the transition from grounded to floating ice as x increases and
+    linearly interpolates its x-coordinate.
 
-        flotation_difference = zb + (rho_i / rho_w) * H.
-
-    This is approximately zero for floating ice and positive for
-    grounded ice. The grounding line is plotted as the 0.5 contour of
-    the resulting binary grounded mask.
+    Returns
+    -------
+    x_gl : ndarray
+        Grounding-line x coordinates in km.
+    y_gl : ndarray
+        Grounding-line y coordinates in km.
+    difference_values : ndarray
+        Hydrostatic flotation difference at all horizontal nodes in m.
     """
 
     V = H.function_space()
@@ -306,57 +349,127 @@ def grounding_line_surface(H, zb):
         zb + Constant(rhoi / rhow) * H
     )
 
-    x_gl, y_gl, difference_values = thickness_surface(
+    x, y, difference_values = thickness_surface(
         flotation_difference
     )
 
-    grounded_mask = (
-        difference_values > grounding_line_tolerance
-    ).astype(float)
+    # Group nodes into horizontal y-rows. Coordinates are already in km.
+    y_rounded = np.round(y, decimals=10)
+    unique_y = np.unique(y_rounded)
 
-    return x_gl, y_gl, grounded_mask, difference_values
+    x_gl = []
+    y_gl = []
 
+    total_grounded = int(
+        np.count_nonzero(
+            difference_values > grounding_line_tolerance
+        )
+    )
+    total_floating = int(
+        difference_values.size - total_grounded
+    )
 
-def add_grounding_line(
-    ax,
-    x,
-    y,
-    grounded_mask,
-):
-    """
-    Overlay the grounded-to-floating transition on an existing axis.
-    """
+    print(
+        "Grounding-line classification: "
+        f"{total_grounded} grounded nodes, "
+        f"{total_floating} floating nodes "
+        f"using tolerance {grounding_line_tolerance:g} m"
+    )
 
-    minimum = np.min(grounded_mask)
-    maximum = np.max(grounded_mask)
+    for y_value in unique_y:
+        row = np.where(y_rounded == y_value)[0]
 
-    if np.isclose(minimum, maximum):
-        state = (
-            "grounded"
-            if minimum > 0.5
-            else "floating"
+        if row.size < 2:
+            continue
+
+        row_order = np.argsort(x[row])
+        row = row[row_order]
+
+        x_row = x[row]
+        difference_row = difference_values[row]
+        grounded_row = (
+            difference_row > grounding_line_tolerance
         )
 
+        # Find every change between grounded and floating. In MISMIP+
+        # the relevant transition is normally grounded -> floating as x
+        # increases. If several transitions occur, keep the downstream-most.
+        state_changes = np.where(
+            grounded_row[:-1] != grounded_row[1:]
+        )[0]
+
+        if state_changes.size == 0:
+            continue
+
+        grounded_to_floating = state_changes[
+            grounded_row[state_changes]
+            & ~grounded_row[state_changes + 1]
+        ]
+
+        if grounded_to_floating.size > 0:
+            transition = grounded_to_floating[-1]
+        else:
+            transition = state_changes[-1]
+
+        x0 = x_row[transition]
+        x1 = x_row[transition + 1]
+        d0 = difference_row[transition]
+        d1 = difference_row[transition + 1]
+
+        # Interpolate to D = grounding_line_tolerance. If the two values
+        # are effectively identical, use the midpoint.
+        if np.isclose(d0, d1):
+            x_crossing = 0.5 * (x0 + x1)
+        else:
+            fraction = (
+                (grounding_line_tolerance - d0)
+                / (d1 - d0)
+            )
+            fraction = np.clip(fraction, 0.0, 1.0)
+            x_crossing = x0 + fraction * (x1 - x0)
+
+        x_gl.append(x_crossing)
+        y_gl.append(float(y_value))
+
+    x_gl = np.asarray(x_gl, dtype=float)
+    y_gl = np.asarray(y_gl, dtype=float)
+
+    if x_gl.size == 0:
         print(
-            f"Warning: the plotted domain is entirely {state}; "
-            "no grounding line can be drawn."
+            "Warning: no grounded-to-floating transition was found on "
+            "any y-row. Check the printed flotation-difference range and "
+            "try changing grounding_line_tolerance."
         )
+        return x_gl, y_gl, difference_values
 
+    order = np.argsort(y_gl)
+    x_gl = x_gl[order]
+    y_gl = y_gl[order]
+
+    print(
+        f"Grounding line extracted on {x_gl.size} y-rows; "
+        f"x range = {np.min(x_gl):.3f} to {np.max(x_gl):.3f} km"
+    )
+
+    return x_gl, y_gl, difference_values
+
+
+def add_grounding_line(ax, x_gl, y_gl):
+    """Draw an explicit grounding-line curve on an existing axis."""
+
+    if x_gl.size == 0:
         return None
 
-    triangulation = mtri.Triangulation(
-        x,
-        y,
+    line, = ax.plot(
+        x_gl,
+        y_gl,
+        color=grounding_line_color,
+        linewidth=grounding_line_width,
+        zorder=40,
+        label="Grounding line",
     )
 
-    return ax.tricontour(
-        triangulation,
-        grounded_mask,
-        levels=[0.5],
-        colors=grounding_line_color,
-        linewidths=grounding_line_width,
-        zorder=30,
-    )
+    return line
 
 
 # ---------------------------------------------------------------------
@@ -672,9 +785,8 @@ def main():
     (
         x_gl,
         y_gl,
-        grounded_mask,
         flotation_difference,
-    ) = grounding_line_surface(
+    ) = grounding_line_curve(
         H,
         zb,
     )
@@ -716,7 +828,7 @@ def main():
         colorbar_label=(
             r"Ice thickness, $H$ [m]"
         ),
-        cmap="viridis",
+        cmap=spectral_lower,
         contour_format="%.0f",
     )
 
@@ -734,23 +846,22 @@ def main():
             r"$\sqrt{u_x^2+u_y^2}$ "
             r"[m yr$^{-1}$]"
         ),
-        cmap="magma",
+        cmap=spectral_upper,
         contour_format="%.0f",
     )
 
     grounding_line_drawn = False
 
     for ax in axes:
-        contour = add_grounding_line(
+        line = add_grounding_line(
             ax,
             x_gl,
             y_gl,
-            grounded_mask,
         )
 
         grounding_line_drawn = (
             grounding_line_drawn
-            or contour is not None
+            or line is not None
         )
 
     if grounding_line_drawn:
@@ -796,4 +907,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

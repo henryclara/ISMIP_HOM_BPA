@@ -1,46 +1,84 @@
-
 from firedrake import *
 import numpy as np
 import os
+from pathlib import Path
 from config import *
 from datetime import datetime
+
+# ------------------------------------------------------------
+# Read the initial state from the original MISMIP+ experiment.
+# ------------------------------------------------------------
+
+restart_from = f"Simulations/MISMIP_output_theta1_dt10_GL_predFalse/restart_t10000.h5"
+
+# Change this path to the repository where you want new results.
+output_root = Path("../Simulations/MISMIP_Ice1r")
+
+output_root.mkdir(parents=True, exist_ok=True)
+
+# domain.py must know which checkpoint mesh to load.
+os.environ["RESTART_MESH_FILE"] = str(restart_from)
+
+from domain import *
+from fields import *
+from physics import *
+from geometry import *
+from spaces import *
+from bcs import *
+from io_local import *
+
+Q1 = FunctionSpace(mesh3D, "CG", 1)
+
+# Save the original restart mesh because every simulation moves the mesh.
+restart_coordinates = Function(
+    mesh3D.coordinates.function_space()
+)
+restart_coordinates.assign(mesh3D.coordinates)
 
 for dt in dts:
     for theta_out in theta_outs:
 
-        start_step = 0
-        restart_from = f"Simulations/MISMIP_output_theta1_dt10_GL_predFalse/restart_t10000.h5" # Change to whatever is correct
-        if restart_from is not None:
-            os.environ["RESTART_MESH_FILE"] = restart_from
+        simulation_start = datetime.now()
 
-        from domain import *
-        from fields import *
-        from physics import *
-        from geometry import *
-        from spaces import *
-        from bcs import *
-        from io_local import *
+        mesh3D.coordinates.assign(restart_coordinates)
+        (t_restart,saved_step,dt_restart,theta_restart) = load_restart(str(restart_from))
 
-        Q1 = FunctionSpace(mesh3D, "CG", 1)
+        u_prev.assign(uvec_out)
+        H.assign(thick)
+
         zeta = Function(Q1, name="zeta")
-        zeta_im = Function(Q1, name="zeta")
+        zeta_im = Function(Q1, name="zeta_im")
         zeta_out = Function(Q1, name="zeta_out")
         zeta_predicted = Function(Q1, name="zeta_predicted")
 
-        simulation_start = datetime.now()
-
-        if restart_from is None:
-            reset_state()
-            t_restart = 0.0
-            start_step = 0
-        else:
-            t_restart, start_step, dt_restart, theta_restart = load_restart(restart_from)
-            u_prev.assign(uvec_out)
-            print(f"Restarting from t={t_restart:g}, step={start_step}")
+        print(
+            f"Restarting dt={dt:g}, theta={theta_out:g} "
+            f"from t={t_restart:g}"
+        )
         
         print("=" * 80)
         print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
         print("=" * 80)
+
+        theta = Constant(theta_out)
+
+        # T is the final physical time, not the number of steps.
+        remaining_time = T - t_restart
+        num_steps = int(round(remaining_time / dt))
+
+        if num_steps <= 0:
+            raise ValueError(
+                f"No time steps requested: "
+                f"T={T:g}, restart time={t_restart:g}, dt={dt:g}"
+            )
+
+        # Separate directory for each dt/theta combination.
+        run_dir = output_root / (
+            f"theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        outfile = VTKFile(str(run_dir / "Ice1r.pvd"))
 
         theta = Constant(theta_out)
         num_TS = int(T / dt)
@@ -67,7 +105,9 @@ for dt in dts:
             vvect, r = TestFunctions(W)
             v1, v2 = split(vvect)
 
-        for i in range(start_step, num_TS):
+        for local_step in range(num_steps):
+            step_number = local_step + 1
+
             print("Solving momentum")
 
             mu = viscosity(ux, uy, 3.0)
@@ -214,25 +254,35 @@ for dt in dts:
             mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma_ref * thick]))
             print("Finished solving thickness evolution...")
 
-            if restart_from is None:
-                print("Year: ", (i+1)*dt)
-            else:
-                print("Year: ", (t_restart + (i - start_step + 1) * dt))
+            t = t_restart + step_number * dt
+            print("Year:", t)
 
-            if restart_from is None:
-                t = (i + 1) * dt
-            else:
-                t = t_restart + (i - start_step + 1) * dt
+            ux_out, uy_out = split(uvec_out)
+            uout.interpolate(
+                as_vector([ux_out, uy_out, 0.0])
+            )
+            zeta_out.interpolate(zeta)
 
-            if abs(t % dt) < 1.0e-10 or abs((t % dt) - dt) < 1.0e-10:
-                ux_out, uy_out = split(uvec_out)
-                uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
-                zeta_out.interpolate(zeta)
-                outfile.write(uout, thick, zs, zb, bed, zeta_out, zeta_predicted, time=t)
-                restart_dir = f"Simulations/MISMIP_Ice1r_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
-                os.makedirs(restart_dir, exist_ok=True)
-                restart_file = f"{restart_dir}/restart_t{t:g}.h5"
-                save_restart(restart_file, t, i+1, dt, theta_out)
+            outfile.write(
+                uout,
+                thick,
+                zs,
+                zb,
+                bed,
+                zeta_out,
+                zeta_predicted,
+                time=t,
+            )
+
+            restart_file = run_dir / f"restart_t{t:g}.h5"
+
+            save_restart(
+                str(restart_file),
+                t,
+                step_number,
+                dt,
+                theta_out,
+            )
 
         simulation_end = datetime.now()
         print(f"Simulation time: {simulation_end - simulation_start}")

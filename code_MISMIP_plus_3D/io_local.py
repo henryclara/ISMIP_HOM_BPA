@@ -12,6 +12,7 @@ def save_restart(filename, t, step, dt, theta_out):
         afile.save_function(thick, name="thick")
         afile.save_function(zb, name="zb")
         afile.save_function(zs, name="zs")
+        afile.save_function(zs, name="bed")
         afile.save_function(w, name="w")
         afile.save_function(uvec_out, name="uvec_out")
 

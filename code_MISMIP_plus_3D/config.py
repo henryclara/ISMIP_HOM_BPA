@@ -5,15 +5,16 @@ Lx = 640000.0
 Ly_full = 80000.0
 Ly = Ly_full / 2.0
 
-nx = int(640/8)
-ny = int(40/8)
-nz = int(10/2)
+nx = int(640/2)
+ny = int(40/2)
+nz = int(10)
 
-dts = [50, 20, 10, 5, 2, 1, 0.1]
-theta_outs = [1, 0]
+dts = [0.5]
+theta_outs = [1]
 FSSA_keyword = "full"
 zeta_pred = False
-T = 10500
+T = 10000
+output_int = 500
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(20.0)

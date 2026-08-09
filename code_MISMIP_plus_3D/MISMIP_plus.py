@@ -1,799 +1,234 @@
-import os
-
-os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from firedrake import *
-from firedrake import CheckpointFile
-
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.tri as mtri
-from matplotlib.lines import Line2D
+import os
+from config import *
+from datetime import datetime
 
+start_step = 0
+restart_from = f"Simulations/refined_MISMIP_output_theta1_dt1_GL_predFalse_nx_160_nz_10/restart_t9000.h5"
+if restart_from is not None:
+    os.environ["RESTART_MESH_FILE"] = restart_from
 
-# ---------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------
+from domain import *
+from fields import *
+from physics import *
+from geometry import *
+from spaces import *
+from bcs import *
+from io_local import *
 
-T = 2000
+Q1 = FunctionSpace(mesh3D, "CG", 1)
+zeta = Function(Q1, name="zeta")
+zeta_im = Function(Q1, name="zeta")
+zeta_out = Function(Q1, name="zeta_out")
+zeta_predicted = Function(Q1, name="zeta_predicted")
 
-dt = 2
-theta = 1
-zeta_pred = False
+for dt in dts:
+    for theta_out in theta_outs:
 
-output_directory = "Simulations"
+        simulation_start = datetime.now()
 
-number_of_filled_levels = 40
-number_of_contour_levels = 10
+        if restart_from is None:
+            reset_state()
+            t_restart = 0.0
+            start_step = 0
+        else:
+            t_restart, start_step, dt_restart, theta_restart = load_restart(restart_from)
+            u_prev.assign(uvec_out)
+            print(f"Restarting from t={t_restart:g}, step={start_step}")
+        
+        print("=" * 80)
+        print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
+        print("=" * 80)
 
-plot_contour_lines = True
-figure_dpi = 700
+        theta = Constant(theta_out)
+        num_TS = int(T / dt)
 
-# Nodes for which the hydrostatic flotation difference is larger than
-# this tolerance are treated as grounded. The difference is
-#
-#     zb + (rho_i / rho_w) * H.
-#
-# It is zero for freely floating ice and positive for grounded ice.
-grounding_line_tolerance = 0.1
+        outfile = VTKFile(f"Simulations/MISMIP_refined_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}_nx_{int(nx)}_nz_{int(nz)}.pvd")
 
-# Only the density ratio is needed for the flotation criterion.
-rhoi = 917.0
-rhow = 1028.0
-grounding_line_color = "cyan"
-grounding_line_width = 2.2
+        if theta_out == 0:
+            uvec = Function(VV)
+            uvec.assign(w.sub(0))
 
+            ux, uy = split(uvec)
 
-# ---------------------------------------------------------------------
-# Load restart data
-# ---------------------------------------------------------------------
+            du = TrialFunction(VV)
+            vvect = TestFunction(VV)
+            v1, v2 = split(vvect)
 
-def load_state(dt, theta):
-    """
-    Load the mesh, saved geometry fields and velocity.
-    """
+        else:
+            uvec, q = split(w)
 
-    filename = (
-        f"{output_directory}/"
-        f"MISMIP_output_theta{theta:g}_dt{dt:g}_GL_pred{zeta_pred}/"
-        f"restart_t{T:g}.h5"
-    )
+            ux, uy = split(uvec)
+            q1, q2 = split(q)
 
-    if not os.path.exists(filename):
-        raise FileNotFoundError(
-            f"Restart file not found:\n{filename}\n"
-            "Check T, dt, theta and zeta_pred."
-        )
+            dw = TrialFunction(W)
 
-    print(f"Loading restart file:\n{filename}")
+            vvect, r = TestFunctions(W)
+            v1, v2 = split(vvect)
 
-    with CheckpointFile(filename, "r") as afile:
+        for i in range(start_step, num_TS):
+            print("Solving momentum")
 
-        try:
-            mesh = afile.load_mesh(
-                name="firedrake_default_extruded",
-                reorder=False,
+            mu = viscosity(ux, uy, 3.0)
+
+            surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
+
+            F = (4 * mu * ux.dx(0) + 2 * mu * uy.dx(1)) * v1.dx(0) * dx \
+                            + (mu * ux.dx(1) + mu * uy.dx(0)) * v1.dx(1) * dx \
+                            + mu * ux.dx(2) * v1.dx(2) * dx
+                        
+            F += (4 * mu * uy.dx(1) + 2 * mu * ux.dx(0)) * v2.dx(1) * dx \
+                            + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
+                            + mu * uy.dx(2) * v2.dx(2) * dx
+
+            phi_float = bed + (rhoi/rhow) * thick
+            delta_GL = Constant(0.01)
+            grounded_prediction = Function(Q1, name="grounded_prediction")
+
+            n = FacetNormal(mesh3D)
+
+            F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
+
+            eps_H = Constant(1.0e-10)
+
+            p_W = rhow * g * max_value(0.0, thick - zs)
+            p_I = rhoi * g * max_value(thick, eps_H)
+
+            zeta.interpolate(min_value(1.0, max_value(0.0, p_W / p_I)))
+
+            if zeta_pred == True:
+                H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b)
+                phi_pred = bed + (rhoi/rhow) * H_k_plus_1
+                zeta_im.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
+                
+            zeta_predicted.assign(zeta_im)
+
+            m = Constant(3.0)
+
+            C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
+
+            if zeta_pred == True:
+                F += (1 - zeta_im) * C * dot(uvec, vvect) * ds_b
+
+            elif zeta_pred == False:
+                F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
+
+            gamma = rhoi * g * (1 - (rhoi/rhow))
+            gdash = rhoi * g
+
+            if theta_out != 0 and FSSA_keyword == "full":
+                # First line (excluding first term)
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1.dx(0) + v2.dx(1)) * dx
+
+                # Second line
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
+
+                # Third line
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b) * (v1 * zb.dx(0) + v2 * zb.dx(1)) * ds_b
+                
+                F += dot(q - thick * uvec, r) * dx
+
+            if theta_out == 0:
+                J = derivative(F, uvec, du)
+                problem = NonlinearVariationalProblem(F, uvec, bcs=bcs_u, J=J)
+            else:
+                J = derivative(F, w, dw)
+                problem = NonlinearVariationalProblem(F, w, bcs=bcs_w, J=J)
+
+            solver = NonlinearVariationalSolver(
+                problem,
+                solver_parameters={
+                    "snes_type": "newtonls",
+                    "snes_linesearch_type": "bt",
+                    "snes_rtol": 1.0e-5,
+                    "snes_atol": 1.0e-5,
+                    "snes_max_it": 200,
+
+                    "mat_type": "aij",
+                    "ksp_type": "preonly",
+                    "pc_type": "lu",
+                    "pc_factor_mat_solver_type": "mumps",
+
+                    "snes_monitor": None,
+                    "ksp_monitor_true_residual": None,
+                    "ksp_error_if_not_converged": None,
+                },
             )
 
-        except Exception:
-            mesh = afile.load_mesh(
-                reorder=False,
+            solver.solve()
+            if theta_out == 0:
+                uvec_out.assign(uvec)
+                w.sub(0).assign(uvec_out)
+            else:
+                uvec_out.assign(w.sub(0))
+
+            u_prev.assign(uvec_out)
+
+            print("Solving thickness evolution now...")
+
+            ubar = Function(VVbar, name="u_bar")
+            ubar.project(uvec_out)
+            ux_bar, uy_bar = split(ubar)
+
+            vel = as_vector([ux_bar, uy_bar])
+            vnorm = sqrt(dot(vel, vel) + 1e-10)
+            h = Constant(Lx / nx)
+            mu_art = 0.1 * h * vnorm
+
+            z_ref = Function(Q1, name="z_ref")
+            z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
+
+            sigma_ref = Function(Q1, name="sigma_ref")
+            sigma_ref.interpolate((z_ref - zb) / thick)
+
+            F = (
+                thick_new * phi * dx \
+                - thick * phi * dx \
+                + dt * (ux_bar * thick_new).dx(0) * phi * dx
+                + dt * (uy_bar * thick_new).dx(1) * phi * dx
+                - dt * (a_s - a_b) * phi * dx
+                # Artifical viscosity
+                + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
             )
 
-        H = afile.load_function(
-            mesh,
-            "thick",
-        )
-
-        zs = afile.load_function(
-            mesh,
-            "zs",
-        )
-
-        zb = afile.load_function(
-            mesh,
-            "zb",
-        )
-
-        # Velocity used by the restart state.
-        velocity = afile.load_function(
-            mesh,
-            "uvec_out",
-        )
-
-    return mesh, H, zs, zb, velocity
-
-
-# ---------------------------------------------------------------------
-# Combine repeated horizontal coordinates
-# ---------------------------------------------------------------------
-
-def combine_duplicate_xy(
-    x_values,
-    y_values,
-    field_values,
-    decimals=12,
-):
-    """
-    Average values that have identical horizontal coordinates.
-    """
-
-    x_values = np.asarray(
-        x_values,
-        dtype=float,
-    ).reshape(-1)
-
-    y_values = np.asarray(
-        y_values,
-        dtype=float,
-    ).reshape(-1)
-
-    field_values = np.asarray(
-        field_values,
-        dtype=float,
-    ).reshape(-1)
-
-    if not (
-        x_values.size
-        == y_values.size
-        == field_values.size
-    ):
-        raise ValueError(
-            "Coordinate and field arrays have different sizes:\n"
-            f"x: {x_values.size}\n"
-            f"y: {y_values.size}\n"
-            f"field: {field_values.size}"
-        )
-
-    finite = (
-        np.isfinite(x_values)
-        & np.isfinite(y_values)
-        & np.isfinite(field_values)
-    )
-
-    x_values = x_values[finite]
-    y_values = y_values[finite]
-    field_values = field_values[finite]
-
-    xy_values = np.column_stack(
-        (
-            x_values,
-            y_values,
-        )
-    )
-
-    xy_rounded = np.round(
-        xy_values,
-        decimals=decimals,
-    )
-
-    xy_unique, inverse = np.unique(
-        xy_rounded,
-        axis=0,
-        return_inverse=True,
-    )
-
-    field_sum = np.zeros(
-        xy_unique.shape[0],
-        dtype=float,
-    )
-
-    counts = np.zeros(
-        xy_unique.shape[0],
-        dtype=int,
-    )
-
-    np.add.at(
-        field_sum,
-        inverse,
-        field_values,
-    )
-
-    np.add.at(
-        counts,
-        inverse,
-        1,
-    )
-
-    field_unique = field_sum / counts
-
-    # Sort first by x and then by y.
-    order = np.lexsort(
-        (
-            xy_unique[:, 1],
-            xy_unique[:, 0],
-        )
-    )
-
-    return (
-        xy_unique[order, 0],
-        xy_unique[order, 1],
-        field_unique[order],
-    )
-
-
-# ---------------------------------------------------------------------
-# Extract horizontal thickness field
-# ---------------------------------------------------------------------
-
-def thickness_surface(H):
-    """
-    Return the horizontal thickness field H(x, y).
-
-    Repeated values through the vertical column are averaged.
-    """
-
-    V = H.function_space()
-    mesh = H.ufl_domain()
-
-    coordinates = SpatialCoordinate(mesh)
-
-    x_on_H = Function(
-        V,
-        name="x_on_H",
-    )
-
-    y_on_H = Function(
-        V,
-        name="y_on_H",
-    )
-
-    x_on_H.interpolate(
-        coordinates[0]
-    )
-
-    y_on_H.interpolate(
-        coordinates[1]
-    )
-
-    x_values = np.asarray(
-        x_on_H.dat.data_ro,
-        dtype=float,
-    )
-
-    y_values = np.asarray(
-        y_on_H.dat.data_ro,
-        dtype=float,
-    )
-
-    H_values = np.asarray(
-        H.dat.data_ro,
-        dtype=float,
-    )
-
-    x_unique, y_unique, H_unique = combine_duplicate_xy(
-        x_values,
-        y_values,
-        H_values,
-    )
-
-    return (
-        x_unique / 1000.0,
-        y_unique / 1000.0,
-        H_unique,
-    )
-
-
-# ---------------------------------------------------------------------
-# Extract grounding-line indicator from hydrostatic equilibrium
-# ---------------------------------------------------------------------
-
-def grounding_line_surface(H, zb):
-    """
-    Return a horizontal grounded/floating indicator.
-
-    The model defines the freely floating ice base as
-
-        zb_float = -(rho_i / rho_w) * H.
-
-    Therefore, the hydrostatic flotation difference is
-
-        flotation_difference = zb + (rho_i / rho_w) * H.
-
-    This is approximately zero for floating ice and positive for
-    grounded ice. The grounding line is plotted as the 0.5 contour of
-    the resulting binary grounded mask.
-    """
-
-    V = H.function_space()
-
-    flotation_difference = Function(
-        V,
-        name="hydrostatic_flotation_difference",
-    )
-
-    flotation_difference.interpolate(
-        zb + Constant(rhoi / rhow) * H
-    )
-
-    x_gl, y_gl, difference_values = thickness_surface(
-        flotation_difference
-    )
-
-    grounded_mask = (
-        difference_values > grounding_line_tolerance
-    ).astype(float)
-
-    return x_gl, y_gl, grounded_mask, difference_values
-
-
-def add_grounding_line(
-    ax,
-    x,
-    y,
-    grounded_mask,
-):
-    """
-    Overlay the grounded-to-floating transition on an existing axis.
-    """
-
-    minimum = np.min(grounded_mask)
-    maximum = np.max(grounded_mask)
-
-    if np.isclose(minimum, maximum):
-        state = (
-            "grounded"
-            if minimum > 0.5
-            else "floating"
-        )
-
-        print(
-            f"Warning: the plotted domain is entirely {state}; "
-            "no grounding line can be drawn."
-        )
-
-        return None
-
-    triangulation = mtri.Triangulation(
-        x,
-        y,
-    )
-
-    return ax.tricontour(
-        triangulation,
-        grounded_mask,
-        levels=[0.5],
-        colors=grounding_line_color,
-        linewidths=grounding_line_width,
-        zorder=30,
-    )
-
-
-# ---------------------------------------------------------------------
-# Extract upper-surface velocity magnitude
-# ---------------------------------------------------------------------
-
-def velocity_surface(velocity):
-    """
-    Extract the upper-surface horizontal speed.
-
-    The plotted speed is
-
-        sqrt(u_x**2 + u_y**2)
-
-    and therefore excludes any vertical velocity component.
-    """
-
-    mesh = velocity.ufl_domain()
-
-    if len(velocity.ufl_shape) != 1:
-        raise ValueError(
-            "uvec_out is not vector-valued."
-        )
-
-    if velocity.ufl_shape[0] < 2:
-        raise ValueError(
-            "uvec_out has fewer than two components."
-        )
-
-    # Scalar space with explicit vertical degrees of freedom.
-    Q1 = FunctionSpace(
-        mesh,
-        "CG",
-        1,
-    )
-
-    coordinates = SpatialCoordinate(mesh)
-
-    x_field = Function(
-        Q1,
-        name="velocity_x_coordinate",
-    )
-
-    y_field = Function(
-        Q1,
-        name="velocity_y_coordinate",
-    )
-
-    z_field = Function(
-        Q1,
-        name="velocity_z_coordinate",
-    )
-
-    speed_field = Function(
-        Q1,
-        name="surface_horizontal_speed",
-    )
-
-    x_field.interpolate(
-        coordinates[0]
-    )
-
-    y_field.interpolate(
-        coordinates[1]
-    )
-
-    z_field.interpolate(
-        coordinates[2]
-    )
-
-    speed_field.interpolate(
-        sqrt(
-            velocity[0] ** 2
-            + velocity[1] ** 2
-        )
-    )
-
-    # Select degrees of freedom on the logical top boundary.
-    top_nodes = np.asarray(
-        DirichletBC(
-            Q1,
-            0.0,
-            "top",
-        ).nodes,
-        dtype=np.int64,
-    )
-
-    if top_nodes.size > 0:
-
-        x_values = np.asarray(
-            x_field.dat.data_ro_with_halos[top_nodes],
-            dtype=float,
-        )
-
-        y_values = np.asarray(
-            y_field.dat.data_ro_with_halos[top_nodes],
-            dtype=float,
-        )
-
-        speed_values = np.asarray(
-            speed_field.dat.data_ro_with_halos[top_nodes],
-            dtype=float,
-        )
-
-    else:
-        # Fallback: select the node with maximum physical z in
-        # each vertical column.
-        print(
-            "Warning: no logical top nodes were found. "
-            "Selecting maximum-z nodes instead."
-        )
-
-        x_all = np.asarray(
-            x_field.dat.data_ro,
-            dtype=float,
-        ).reshape(-1)
-
-        y_all = np.asarray(
-            y_field.dat.data_ro,
-            dtype=float,
-        ).reshape(-1)
-
-        z_all = np.asarray(
-            z_field.dat.data_ro,
-            dtype=float,
-        ).reshape(-1)
-
-        speed_all = np.asarray(
-            speed_field.dat.data_ro,
-            dtype=float,
-        ).reshape(-1)
-
-        xy_rounded = np.round(
-            np.column_stack(
-                (
-                    x_all,
-                    y_all,
-                )
-            ),
-            decimals=12,
-        )
-
-        xy_unique, inverse = np.unique(
-            xy_rounded,
-            axis=0,
-            return_inverse=True,
-        )
-
-        selected_nodes = np.empty(
-            xy_unique.shape[0],
-            dtype=np.int64,
-        )
-
-        for column in range(
-            xy_unique.shape[0]
-        ):
-            column_nodes = np.where(
-                inverse == column
-            )[0]
-
-            selected_nodes[column] = column_nodes[
-                np.argmax(
-                    z_all[column_nodes]
-                )
-            ]
-
-        x_values = x_all[selected_nodes]
-        y_values = y_all[selected_nodes]
-        speed_values = speed_all[selected_nodes]
-
-    x_unique, y_unique, speed_unique = combine_duplicate_xy(
-        x_values,
-        y_values,
-        speed_values,
-    )
-
-    return (
-        x_unique / 1000.0,
-        y_unique / 1000.0,
-        speed_unique,
-    )
-
-
-# ---------------------------------------------------------------------
-# Plot one horizontal scalar field
-# ---------------------------------------------------------------------
-
-def plot_horizontal_field(
-    ax,
-    x,
-    y,
-    values,
-    title,
-    colorbar_label,
-    cmap,
-    contour_format,
-):
-    """
-    Plot a scalar field using filled triangular contours.
-    """
-
-    triangulation = mtri.Triangulation(
-        x,
-        y,
-    )
-
-    minimum = np.nanmin(values)
-    maximum = np.nanmax(values)
-
-    if np.isclose(
-        minimum,
-        maximum,
-    ):
-        minimum -= 1.0
-        maximum += 1.0
-
-    filled_levels = np.linspace(
-        minimum,
-        maximum,
-        number_of_filled_levels,
-    )
-
-    contour_levels = np.linspace(
-        minimum,
-        maximum,
-        number_of_contour_levels,
-    )
-
-    surface = ax.tricontourf(
-        triangulation,
-        values,
-        levels=filled_levels,
-        cmap=cmap,
-        extend="both",
-    )
-
-    if plot_contour_lines:
-        contours = ax.tricontour(
-            triangulation,
-            values,
-            levels=contour_levels,
-            colors="black",
-            linewidths=0.4,
-            alpha=0.5,
-        )
-
-        ax.clabel(
-            contours,
-            fontsize=7,
-            fmt=contour_format,
-        )
-
-    colorbar = plt.colorbar(
-        surface,
-        ax=ax,
-        pad=0.02,
-    )
-
-    colorbar.set_label(
-        colorbar_label,
-        fontsize=13,
-    )
-
-    colorbar.ax.tick_params(
-        labelsize=10,
-    )
-
-    ax.set_xlabel(
-        r"$x$ [km]",
-        fontsize=13,
-    )
-
-    ax.set_ylabel(
-        r"$y$ [km]",
-        fontsize=13,
-    )
-
-    ax.set_title(
-        title,
-        fontsize=14,
-    )
-
-    ax.tick_params(
-        axis="both",
-        labelsize=11,
-    )
-
-    # Use "equal" for the true physical aspect ratio.
-    # "auto" makes the long domain easier to inspect.
-    ax.set_aspect("auto")
-
-    return surface
-
-
-# ---------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------
-
-def main():
-    mesh, H, zs, zb, velocity = load_state(
-        dt,
-        theta,
-    )
-
-    x_H, y_H, H_values = thickness_surface(
-        H
-    )
-
-    x_u, y_u, speed_values = velocity_surface(
-        velocity
-    )
-
-    (
-        x_gl,
-        y_gl,
-        grounded_mask,
-        flotation_difference,
-    ) = grounding_line_surface(
-        H,
-        zb,
-    )
-
-    print(
-        "Thickness range: "
-        f"{np.min(H_values):.3f} to "
-        f"{np.max(H_values):.3f} m"
-    )
-
-    print(
-        "Upper-surface horizontal speed range: "
-        f"{np.min(speed_values):.3f} to "
-        f"{np.max(speed_values):.3f} m/yr"
-    )
-
-    print(
-        "Hydrostatic flotation-difference range: "
-        f"{np.min(flotation_difference):.6e} to "
-        f"{np.max(flotation_difference):.6e} m"
-    )
-
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=(12, 9),
-        constrained_layout=True,
-    )
-
-    plot_horizontal_field(
-        ax=axes[0],
-        x=x_H,
-        y=y_H,
-        values=H_values,
-        title=(
-            fr"Ice thickness at $T={T:g}$ years, "
-            fr"$\Delta t={dt:g}$, $\theta={theta:g}$"
-        ),
-        colorbar_label=(
-            r"Ice thickness, $H$ [m]"
-        ),
-        cmap="viridis",
-        contour_format="%.0f",
-    )
-
-    plot_horizontal_field(
-        ax=axes[1],
-        x=x_u,
-        y=y_u,
-        values=speed_values,
-        title=(
-            fr"Upper-surface horizontal speed at "
-            fr"$T={T:g}$ years"
-        ),
-        colorbar_label=(
-            r"Horizontal speed, "
-            r"$\sqrt{u_x^2+u_y^2}$ "
-            r"[m yr$^{-1}$]"
-        ),
-        cmap="magma",
-        contour_format="%.0f",
-    )
-
-    grounding_line_drawn = False
-
-    for ax in axes:
-        contour = add_grounding_line(
-            ax,
-            x_gl,
-            y_gl,
-            grounded_mask,
-        )
-
-        grounding_line_drawn = (
-            grounding_line_drawn
-            or contour is not None
-        )
-
-    if grounding_line_drawn:
-        grounding_line_handle = Line2D(
-            [0],
-            [0],
-            color=grounding_line_color,
-            linewidth=grounding_line_width,
-            label="Grounding line",
-        )
-
-        for ax in axes:
-            ax.legend(
-                handles=[grounding_line_handle],
-                loc="best",
-                fontsize=10,
-                frameon=True,
-            )
-
-    os.makedirs(
-        output_directory,
-        exist_ok=True,
-    )
-
-    output_filename = (
-        f"{output_directory}/"
-        f"thickness_velocity_and_grounding_line_"
-        f"theta{theta:g}_dt{dt:g}_T{T:g}.png"
-    )
-
-    plt.savefig(
-        output_filename,
-        dpi=figure_dpi,
-        bbox_inches="tight",
-    )
-
-    print(
-        f"Saved figure to:\n{output_filename}"
-    )
-
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()
-
+            old_thick = Function(Vbar)
+            old_thick.assign(thick)
+
+            solve(lhs(F) == rhs(F), H)
+            thick.assign(H)
+            thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
+
+            zb_float = -rhoi / rhow * thick
+            zb.interpolate(max_value(bed, zb_float))
+            zs.interpolate(zb + thick)
+
+            phi_float_actual = bed + (rhoi/rhow) * thick
+            zeta.interpolate(0.5 * (1.0 - tanh(phi_float_actual / delta_GL)))
+
+            mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma_ref * thick]))
+            print("Finished solving thickness evolution...")
+
+            if restart_from is None:
+                print("Year: ", (i+1)*dt)
+            else:
+                print("Year: ", (t_restart + (i - start_step + 1) * dt))
+
+            if restart_from is None:
+                t = (i + 1) * dt
+            else:
+                t = t_restart + (i - start_step + 1) * dt
+
+            if abs(t % output_int) < 1.0e-10 or abs((t % output_int) - output_int) < 1.0e-10:
+                ux_out, uy_out = split(uvec_out)
+                uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
+                zeta_out.interpolate(zeta)
+                outfile.write(uout, thick, zs, zb, bed, zeta_out, zeta_predicted, time=t)
+                restart_dir = f"Simulations/MISMIP_refined_output_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}_nx_{int(nx)}_nz_{int(nz)}"
+                os.makedirs(restart_dir, exist_ok=True)
+                restart_file = f"{restart_dir}/restart_t{t:g}.h5"
+                save_restart(restart_file, t, i+1, dt, theta_out)
+
+        simulation_end = datetime.now()
+        print(f"Simulation time: {simulation_end - simulation_start}")

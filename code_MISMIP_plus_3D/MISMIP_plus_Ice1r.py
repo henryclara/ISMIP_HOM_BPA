@@ -9,7 +9,7 @@ from datetime import datetime
 # Read the initial state from the original MISMIP+ experiment.
 # ------------------------------------------------------------
 
-restart_from = f"Simulations/MISMIP_output_theta1_dt10_GL_predFalse/restart_t10000.h5"
+restart_from = f"Simulations/remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_nx_320_nz_10/restart_t10000.h5"
 
 # Change this path to the repository where you want new results.
 output_root = Path("../Simulations/MISMIP_Ice1r")
@@ -128,7 +128,7 @@ for dt in dts:
                             + mu * uy.dx(2) * v2.dx(2) * dx
 
             phi_float = bed + (rhoi/rhow) * thick
-            delta_GL = Constant(0.01)
+            delta_GL = Constant(500.0) # Change this back to 0.01(?)
             grounded_prediction = Function(Q1, name="grounded_prediction")
 
             n = FacetNormal(mesh3D)
@@ -143,9 +143,11 @@ for dt in dts:
             zeta.interpolate(min_value(1.0, max_value(0.0, p_W / p_I)))
 
             if zeta_pred == True:
+
                 H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b_Ice1r)
                 phi_pred = bed + (rhoi/rhow) * H_k_plus_1
-                zeta_im.interpolate(0.5 * (1.0 - tanh(phi_pred / delta_GL)))
+                zeta_im_expr = 0.5 * (1.0 - tanh(phi_pred / delta_GL))
+                zeta_im.interpolate(zeta_im_expr )
                 
             zeta_predicted.assign(zeta_im)
 
@@ -154,7 +156,7 @@ for dt in dts:
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
 
             if zeta_pred == True:
-                F += (1 - zeta_im) * C * dot(uvec, vvect) * ds_b
+                F += (1 - zeta_im_expr) * C * dot(uvec, vvect) * ds_b
 
             elif zeta_pred == False:
                 F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
@@ -170,7 +172,7 @@ for dt in dts:
                 F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
 
                 # Third line
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zs.dx(0) + v2 * zb.dx(1)) * ds_b
+                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zb.dx(0) + v2 * zb.dx(1)) * ds_b
                 
                 F += dot(q - thick * uvec, r) * dx
 
@@ -218,8 +220,9 @@ for dt in dts:
 
             vel = as_vector([ux_bar, uy_bar])
             vnorm = sqrt(dot(vel, vel) + 1e-10)
-            h = CellDiameter(mesh3D)
-            mu_art = 0.1 * h * vnorm
+            #h = CellDiameter(base)
+            h = Constant(Lx / nx)
+            mu_art = 0.2 * h * vnorm
 
             z_ref = Function(Q1, name="z_ref")
             z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
@@ -257,32 +260,34 @@ for dt in dts:
             t = t_restart + step_number * dt
             print("Year:", t)
 
-            ux_out, uy_out = split(uvec_out)
-            uout.interpolate(
-                as_vector([ux_out, uy_out, 0.0])
-            )
-            zeta_out.interpolate(zeta)
+            if abs(t % output_int) < 1.0e-10 or abs((t % output_int) - output_int) < 1.0e-10:
 
-            outfile.write(
-                uout,
-                thick,
-                zs,
-                zb,
-                bed,
-                zeta_out,
-                zeta_predicted,
-                time=t,
-            )
+                ux_out, uy_out = split(uvec_out)
+                uout.interpolate(
+                    as_vector([ux_out, uy_out, 0.0])
+                )
+                zeta_out.interpolate(zeta)
 
-            restart_file = run_dir / f"restart_t{t:g}.h5"
+                outfile.write(
+                    uout,
+                    thick,
+                    zs,
+                    zb,
+                    bed,
+                    zeta_out,
+                    zeta_predicted,
+                    time=t,
+                )
 
-            save_restart(
-                str(restart_file),
-                t,
-                step_number,
-                dt,
-                theta_out,
-            )
+                restart_file = run_dir / f"restart_t{t:g}.h5"
+
+                save_restart(
+                    str(restart_file),
+                    t,
+                    step_number,
+                    dt,
+                    theta_out,
+                )
 
         simulation_end = datetime.now()
         print(f"Simulation time: {simulation_end - simulation_start}")

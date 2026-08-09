@@ -9,7 +9,7 @@ nx = int(640)
 ny = int(40)
 nz = int(10)
 
-dts = [20, 10, 5]
+dts = [2]
 theta_outs = [1]
 FSSA_keyword = "full"
 zeta_pred = True

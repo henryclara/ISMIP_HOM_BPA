@@ -9,10 +9,13 @@ def mismip_bed(x, y):
     X = x / xbar
 
     Bx = B0 + B2 * X**2 + B4 * X**4 + B6 * X**6
-    By = dc * (1.0 / (1.0 + exp(-2.0 * (yc - wc) / fc))
-        + 1.0 / (1.0 + exp( 2.0 * (yc + wc) / fc)))
+    By = dc * (
+        1.0 / (1.0 + exp(-2.0 * (yc - wc) / fc))
+        + 1.0 / (1.0 + exp(2.0 * (yc + wc) / fc))
+    )
 
     return max_value(Bx + By, zdeep)
+
 
 def reset_state():
     from domain import x, y
@@ -33,15 +36,27 @@ def reset_state():
     u_prev.assign(0.0)
 
     u_init = as_vector([
-        10.0 * (1.0 + 0.01 * sin(2.0 * pi * x / Lx) * sin(2.0 * pi * y / Ly_full)),
-        10.0 * (0.01 * sin(2.0 * pi * x / Lx) * sin(2.0 * pi * y / Ly_full)),
+        10.0 * (
+            1.0
+            + 0.01
+            * sin(2.0 * pi * x / Lx)
+            * sin(2.0 * pi * y / Ly_full)
+        ),
+        10.0 * (
+            0.01
+            * sin(2.0 * pi * x / Lx)
+            * sin(2.0 * pi * y / Ly_full)
+        ),
     ])
 
     w.sub(0).interpolate(u_init)
-    #w.sub(1).interpolate(u_init)
-    #w.sub(2).interpolate(u_init)
 
     u0 = w.sub(0)
     ux0, uy0 = split(u0)
 
-    w.sub(1).project(as_vector([thick * ux0, thick * uy0,]))
+    w.sub(1).project(
+        as_vector([
+            thick * ux0,
+            thick * uy0,
+        ])
+    )

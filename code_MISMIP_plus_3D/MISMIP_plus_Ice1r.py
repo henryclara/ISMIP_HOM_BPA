@@ -144,63 +144,10 @@ for dt in dts:
 
             if zeta_pred == True:
 
-                # First prediction using current-time basal melt
-                H_pred_0 = thick - dt * (
-                    q1.dx(0) + q2.dx(1)
-                    - a_s
-                    + a_b_Ice1r
-                )
-
-                # Predicted basal geometry
-                zb_pred = max_value(
-                    bed,
-                    -(rhoi/rhow) * H_pred_0
-                )
-
-                # Basal melt evaluated on predicted geometry
-                cavity_thickness_pred = max_value(
-                    zb_pred - bed,
-                    0.0
-                )
-
-                a_b_pred = (
-                    Constant(0.2)
-                    * tanh(
-                        cavity_thickness_pred
-                        / Constant(75.0)
-                    )
-                    * max_value(
-                        -Constant(100.0) - zb_pred,
-                        Constant(0.0)
-                    )
-                )
-
-                # Final thickness prediction using predicted basal melt
-                H_k_plus_1 = thick - dt * (
-                    q1.dx(0) + q2.dx(1)
-                    - a_s
-                    + a_b_pred
-                )
-
-                phi_pred = (
-                    bed
-                    + (rhoi/rhow) * H_k_plus_1
-                )
-
-                zeta_im_expr = 0.5 * (
-                    1.0
-                    - tanh(phi_pred / delta_GL)
-                )
-
-                zeta_im.interpolate(zeta_im_expr)
-
-            #if zeta_pred == True:
-
-            #    H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b_Ice1r)
-            #    phi_pred = bed + (rhoi/rhow) * H_k_plus_1
-            #    zb_pred = max_value(bed,-(rhoi/rhow) * H_k_plus_1)
-            #    zeta_im_expr = 0.5 * (1.0 - tanh(phi_pred / delta_GL))
-            #    zeta_im.interpolate(zeta_im_expr )
+                H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b_Ice1r)
+                phi_pred = bed + (rhoi/rhow) * H_k_plus_1
+                zeta_im_expr = 0.5 * (1.0 - tanh(phi_pred / delta_GL))
+                zeta_im.interpolate(zeta_im_expr )
                 
             zeta_predicted.assign(zeta_im)
 

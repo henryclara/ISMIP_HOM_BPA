@@ -1,3 +1,5 @@
+from pyclbr import Function
+
 from firedrake import *
 import numpy as np
 import os
@@ -9,17 +11,10 @@ from datetime import datetime
 # Read the initial state from the original MISMIP+ experiment.
 # ------------------------------------------------------------
 
-restart_from = f"Simulations/remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_nx_320_nz_10/restart_t10000.h5"
+restart_from = None #f"Simulations/remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_res_250_nz_10/restart_t10000.h5"
 
-# Change this path to the repository where you want new results.
-output_root = Path("../Simulations/MISMIP_Ice1r")
-
-output_root.mkdir(parents=True, exist_ok=True)
-
-# domain.py must know which checkpoint mesh to load.
 os.environ["RESTART_MESH_FILE"] = str(restart_from)
 
-from domain import *
 from fields import *
 from physics import *
 from geometry import *
@@ -29,7 +24,6 @@ from io_local import *
 
 Q1 = FunctionSpace(mesh3D, "CG", 1)
 
-# Save the original restart mesh because every simulation moves the mesh.
 restart_coordinates = Function(
     mesh3D.coordinates.function_space()
 )
@@ -41,20 +35,26 @@ for dt in dts:
         simulation_start = datetime.now()
 
         mesh3D.coordinates.assign(restart_coordinates)
-        (t_restart,saved_step,dt_restart,theta_restart) = load_restart(str(restart_from))
+
+        if restart_from is not None:
+            (t_restart,saved_step,dt_restart,theta_restart) = load_restart(str(restart_from))
+        else:
+            t_restart = 0.0
+            saved_step = 0
+            dt_restart = dt
+            theta_restart = theta_out
 
         u_prev.assign(uvec_out)
         H.assign(thick)
 
-        zeta = Function(Q1, name="zeta")
-        zeta_im = Function(Q1, name="zeta_im")
         zeta_out = Function(Q1, name="zeta_out")
-        zeta_predicted = Function(Q1, name="zeta_predicted")
+        phi_GL_out = Function(Q1, name="flotation_function")
 
-        print(
-            f"Restarting dt={dt:g}, theta={theta_out:g} "
-            f"from t={t_restart:g}"
-        )
+        if restart_from is not None:
+            print(
+                f"Restarting dt={dt:g}, theta={theta_out:g} "
+                f"from t={t_restart:g}"
+            )
         
         print("=" * 80)
         print(f"Starting run with dt={dt:g}, theta_out={theta_out:g}")
@@ -73,16 +73,12 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = output_root / (
-            f"theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}"
-        )
+        run_dir = Path(f"Simulations/MISMIP_Ice1r_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}_unstrucured_test")
         run_dir.mkdir(parents=True, exist_ok=True)
-
-        outfile = VTKFile(str(run_dir / "Ice1r.pvd"))
 
         theta = Constant(theta_out)
         num_TS = int(T / dt)
-        outfile = VTKFile(f"Simulations/MISMIP_Ice1r_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}.pvd")
+        outfile = VTKFile(str(run_dir / "Ice1r.pvd"))
 
         if theta_out == 0:
             uvec = Function(VV)
@@ -104,6 +100,14 @@ for dt in dts:
 
             vvect, r = TestFunctions(W)
             v1, v2 = split(vvect)
+
+        # 100 and 200 model years after the restart.
+        runtime_milestones = [
+            t_restart + 100.0,
+            t_restart + 200.0,
+        ]
+
+        logged_runtime_milestones = set()
 
         for local_step in range(num_steps):
             step_number = local_step + 1
@@ -127,39 +131,23 @@ for dt in dts:
                             + (mu * uy.dx(0) + mu * ux.dx(1)) * v2.dx(0) * dx \
                             + mu * uy.dx(2) * v2.dx(2) * dx
 
-            phi_float = bed + (rhoi/rhow) * thick
-            delta_GL = Constant(100.0) # Change this back to 0.01(?)
-            grounded_prediction = Function(Q1, name="grounded_prediction")
-
             n = FacetNormal(mesh3D)
 
             F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
 
-            eps_H = Constant(1.0e-10)
+            # Hydrostatic flotation function
+            phi_GL = bed + (rhoi/rhow) * thick
 
-            p_W = rhow * g * max_value(0.0, thick - zs)
-            p_I = rhoi * g * max_value(thick, eps_H)
-
-            zeta.interpolate(min_value(1.0, max_value(0.0, p_W / p_I)))
-
-            if zeta_pred == True:
-
-                H_k_plus_1 = thick - dt * (q1.dx(0) + q2.dx(1) - a_s + a_b_Ice1r)
-                phi_pred = bed + (rhoi/rhow) * H_k_plus_1
-                zeta_im_expr = 0.5 * (1.0 - tanh(phi_pred / delta_GL))
-                zeta_im.interpolate(zeta_im_expr )
-                
-            zeta_predicted.assign(zeta_im)
+            # Discontinuous grounding/floating mask
+            # zeta = 0 grounded, 1 floating
+            zeta = conditional(phi_GL > 0.0, 0.0, 1.0)
 
             m = Constant(3.0)
 
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
 
-            if zeta_pred == True:
-                F += (1 - zeta_im_expr) * C * dot(uvec, vvect) * ds_b
-
-            elif zeta_pred == False:
-                F += (1 - zeta) * C * dot(uvec, vvect) * ds_b
+            gl_quad_degree = 8
+            F += ((1.0 - zeta) * C * dot(uvec, vvect) * ds_b(degree=gl_quad_degree))
 
             gamma = rhoi * g * (1 - (rhoi/rhow))
             gdash = rhoi * g
@@ -222,7 +210,20 @@ for dt in dts:
             vnorm = sqrt(dot(vel, vel) + 1e-10)
             #h = CellDiameter(base)
             h = Constant(Lx / nx)
-            mu_art = 0.2 * h * vnorm
+
+            x, y, z = SpatialCoordinate(mesh3D)
+
+            h_x = conditional(x < Constant(400000.0), Constant(2000.0), \
+                conditional(x <= Constant(500000.0),Constant(100.0),Constant(2000.0),))
+
+            h_y = Constant(2000.0)
+
+            C_art = Constant(0.2)
+
+            eps_u = Constant(1.0e-10)
+
+            mu_x = C_art * h_x * sqrt(ux_bar**2 + eps_u**2)
+            mu_y = C_art * h_y * sqrt(uy_bar**2 + eps_u**2)
 
             z_ref = Function(Q1, name="z_ref")
             z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
@@ -230,15 +231,35 @@ for dt in dts:
             sigma_ref = Function(Q1, name="sigma_ref")
             sigma_ref.interpolate((z_ref - zb) / thick)
 
-            F = (
-                thick_new * phi * dx \
-                - thick * phi * dx \
-                + dt * (ux_bar * thick_new).dx(0) * phi * dx
-                + dt * (uy_bar * thick_new).dx(1) * phi * dx
-                - dt * (a_s - a_b_Ice1r) * phi * dx
-                # Artifical viscosity
-                + dt * mu_art * dot(grad(thick_new), grad(phi)) * dx
-            )
+            if time_stepping == "im":
+                F = (
+                    thick_new * phi * dx
+                    - thick * phi * dx
+                    + dt * (ux_bar * thick_new).dx(0) * phi * dx
+                    + dt * (uy_bar * thick_new).dx(1) * phi * dx
+                    - dt * (a_s - a_b_Ice1r) * phi * dx
+                    # Artificial viscosity
+                    + dt * (
+                        mu_x * thick_new.dx(0) * phi.dx(0)
+                        + mu_y * thick_new.dx(1) * phi.dx(1)
+                    ) * dx
+                )
+
+            elif time_stepping == "im_mi":
+                H_mid = 0.5 * (thick_new + thick)
+
+                F = (
+                    thick_new * phi * dx
+                    - thick * phi * dx
+                    + dt * (ux_bar * H_mid).dx(0) * phi * dx
+                    + dt * (uy_bar * H_mid).dx(1) * phi * dx
+                    - dt * (a_s - a_b_Ice1r) * phi * dx
+                    # Artificial viscosity
+                    + dt * (
+                        mu_x * H_mid.dx(0) * phi.dx(0)
+                        + mu_y * H_mid.dx(1) * phi.dx(1)
+                    ) * dx
+                )
 
             old_thick = Function(Vbar)
             old_thick.assign(thick)
@@ -251,43 +272,75 @@ for dt in dts:
             zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
 
-            phi_float_actual = bed + (rhoi/rhow) * thick
-            zeta.interpolate(0.5 * (1.0 - tanh(phi_float_actual / delta_GL)))
-
             mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma_ref * thick]))
             print("Finished solving thickness evolution...")
 
             t = t_restart + step_number * dt
             print("Year:", t)
 
+            # ---------------------------------------------------------
+            # Save cumulative runtime at 100 and 200 model years
+            # ---------------------------------------------------------
+
+            for milestone in runtime_milestones:
+
+                if (
+                    milestone not in logged_runtime_milestones
+                    and abs(t - milestone) < 1.0e-10
+                ):
+
+                    runtime_checkpoint_end = datetime.now()
+                    runtime_checkpoint = (
+                        runtime_checkpoint_end
+                        - simulation_start
+                    )
+
+                    elapsed_years = (
+                        t - t_restart
+                    )
+
+                    print(
+                        f"Runtime after {elapsed_years:g} model years: "
+                        f"{runtime_checkpoint}"
+                    )
+
+                    os.makedirs(
+                        "Simulations",
+                        exist_ok=True,
+                    )
+
+                    with open(
+                        "Simulations/MISMIP_Ice1r_simulation_times.txt",
+                        "a",
+                    ) as f:
+
+                        f.write(
+                            f"dt={dt:g}, "
+                            f"theta_out={theta_out:g}, "
+                            f"resolution=500, "
+                            f"T_start={t_restart:g}, "
+                            f"T_end={t:g}, "
+                            f"elapsed_years={elapsed_years:g}, "
+                            f"num_steps={step_number}, "
+                            f"start={simulation_start}, "
+                            f"end={runtime_checkpoint_end}, "
+                            f"runtime={runtime_checkpoint}\n"
+                        )
+
+                    logged_runtime_milestones.add(
+                        milestone
+                    )
+
             if abs(t % output_int) < 1.0e-10 or abs((t % output_int) - output_int) < 1.0e-10:
 
                 ux_out, uy_out = split(uvec_out)
-                uout.interpolate(
-                    as_vector([ux_out, uy_out, 0.0])
-                )
+                uout.interpolate(as_vector([ux_out, uy_out, 0.0]))
+                phi_GL_out.interpolate(bed + (rhoi/rhow) * thick)
+
+                grounded_out.interpolate(conditional(phi_GL_out > 0.0,1.0,0.0))
                 zeta_out.interpolate(zeta)
-
-                outfile.write(
-                    uout,
-                    thick,
-                    zs,
-                    zb,
-                    bed,
-                    zeta_out,
-                    zeta_predicted,
-                    time=t,
-                )
-
+                outfile.write(uout, thick, zs, zb, bed, zeta_out, grounded_out, phi_GL_out, time=t)
                 restart_file = run_dir / f"restart_t{t:g}.h5"
 
-                save_restart(
-                    str(restart_file),
-                    t,
-                    step_number,
-                    dt,
-                    theta_out,
-                )
+                save_restart(str(restart_file),t,step_number,dt,theta_out)
 
-        simulation_end = datetime.now()
-        print(f"Simulation time: {simulation_end - simulation_start}")

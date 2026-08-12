@@ -19,7 +19,7 @@ INPUT_RESTART = (
 )
 
 OUTPUT_RESTART = (
-    "Simulations/remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_nx_320_nz_10/"
+    "Simulations/remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_res_100_nz_10/"
     "restart_t10000.h5"
 )
 
@@ -40,7 +40,7 @@ REFINED_X_MAX = 500_000.0
 #
 # The script calculates the number of cells in each region automatically.
 DX_LEFT = 2000.0
-DX_REFINED = 500.0
+DX_REFINED = 100.0
 DX_RIGHT = 2000.0
 
 # Requested y-direction cell size in metres.

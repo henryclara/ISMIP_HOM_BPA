@@ -2,6 +2,7 @@ from firedrake import *
 import numpy as np
 from config import *
 from domain import *
+
 # -----------------------------
 # Elements
 # -----------------------------

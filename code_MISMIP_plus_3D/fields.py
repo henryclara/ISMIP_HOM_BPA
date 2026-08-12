@@ -1,5 +1,4 @@
 from firedrake import *
-from domain import *
 from geometry import *
 from spaces import *
 

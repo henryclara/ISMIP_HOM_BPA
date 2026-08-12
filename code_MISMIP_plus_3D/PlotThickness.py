@@ -16,7 +16,7 @@ from matplotlib.colors import LinearSegmentedColormap
 # Configuration
 # ---------------------------------------------------------------------
 
-T = 2000
+T = 10000
 
 dt = 2
 theta = 1
@@ -27,7 +27,7 @@ output_directory = "Simulations"
 number_of_filled_levels = 40
 number_of_contour_levels = 10
 
-plot_contour_lines = True
+plot_contour_lines = False
 figure_dpi = 700
 
 
@@ -62,6 +62,7 @@ spectral_lower = truncate_colormap(
 spectral_upper = truncate_colormap(
     "Spectral",
     0.6,
+
     1.0,
     "Spectral_upper_half",
 )
@@ -92,7 +93,7 @@ def load_state(dt, theta):
 
     filename = (
         f"{output_directory}/"
-        f"MISMIP_output_theta{theta:g}_dt{dt:g}_GL_pred{zeta_pred}/"
+        f"remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_res_250_nz_10/"
         f"restart_t{T:g}.h5"
     )
 
@@ -666,6 +667,10 @@ def plot_horizontal_field(
     colorbar_label,
     cmap,
     contour_format,
+    vmin=None,
+    vmax=None,
+    colorbar_ticks=None,
+    yticks=None,
 ):
     """
     Plot a scalar field using filled triangular contours.
@@ -676,8 +681,8 @@ def plot_horizontal_field(
         y,
     )
 
-    minimum = np.nanmin(values)
-    maximum = np.nanmax(values)
+    minimum = np.nanmin(values) if vmin is None else vmin
+    maximum = np.nanmax(values) if vmax is None else vmax
 
     if np.isclose(
         minimum,
@@ -703,8 +708,11 @@ def plot_horizontal_field(
         values,
         levels=filled_levels,
         cmap=cmap,
-        extend="both",
+        extend="max",
     )
+
+    if yticks is not None:
+        ax.set_yticks(yticks)
 
     if plot_contour_lines:
         contours = ax.tricontour(
@@ -718,7 +726,7 @@ def plot_horizontal_field(
 
         ax.clabel(
             contours,
-            fontsize=7,
+            fontsize=20,
             fmt=contour_format,
         )
 
@@ -728,33 +736,31 @@ def plot_horizontal_field(
         pad=0.02,
     )
 
+    if colorbar_ticks is not None:
+        colorbar.set_ticks(colorbar_ticks)
+
     colorbar.set_label(
         colorbar_label,
-        fontsize=13,
+        fontsize=25,
     )
 
     colorbar.ax.tick_params(
-        labelsize=10,
+        labelsize=20,
     )
 
     ax.set_xlabel(
         r"$x$ [km]",
-        fontsize=13,
+        fontsize=25,
     )
 
     ax.set_ylabel(
         r"$y$ [km]",
-        fontsize=13,
-    )
-
-    ax.set_title(
-        title,
-        fontsize=14,
+        fontsize=25,
     )
 
     ax.tick_params(
         axis="both",
-        labelsize=11,
+        labelsize=20,
     )
 
     # Use "equal" for the true physical aspect ratio.
@@ -826,10 +832,14 @@ def main():
             fr"$\Delta t={dt:g}$, $\theta={theta:g}$"
         ),
         colorbar_label=(
-            r"Ice thickness, $H$ [m]"
+            r"$H$ [m]"
         ),
         cmap=spectral_lower,
         contour_format="%.0f",
+        vmin=0,
+        vmax=2000,
+        yticks=[40, 50, 60, 70, 80],
+        colorbar_ticks=[0, 500, 1000, 1500, 2000],
     )
 
     plot_horizontal_field(
@@ -842,12 +852,35 @@ def main():
             fr"$T={T:g}$ years"
         ),
         colorbar_label=(
-            r"Horizontal speed, "
-            r"$\sqrt{u_x^2+u_y^2}$ "
-            r"[m yr$^{-1}$]"
+            r"$|\mathbf{u}_\mathrm{2D}|_{z_s}$"
+            r" [m a$^{-1}$]"
         ),
         cmap=spectral_upper,
         contour_format="%.0f",
+        vmin=0,
+        vmax=1000,
+        yticks=[40, 50, 60, 70, 80],
+        colorbar_ticks=[0, 250, 500, 750, 1000],
+    )
+
+    axes[0].text(
+        0.02,
+        0.95,
+        "(a)",
+        transform=axes[0].transAxes,
+        fontsize=25,
+        va="top",
+        ha="left",
+    )
+
+    axes[1].text(
+        0.02,
+        0.95,
+        "(b)",
+        transform=axes[1].transAxes,
+        fontsize=25,
+        va="top",
+        ha="left",
     )
 
     grounding_line_drawn = False
@@ -873,14 +906,6 @@ def main():
             label="Grounding line",
         )
 
-        for ax in axes:
-            ax.legend(
-                handles=[grounding_line_handle],
-                loc="best",
-                fontsize=10,
-                frameon=True,
-            )
-
     os.makedirs(
         output_directory,
         exist_ok=True,
@@ -903,7 +928,6 @@ def main():
     )
 
     plt.show()
-
 
 if __name__ == "__main__":
     main()

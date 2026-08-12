@@ -21,7 +21,7 @@ def save_restart(filename, t, step, dt, theta_out):
 def load_restart(filename):
     from fields import thick, zb, zs
     from spaces import w, uvec_out
-    from domain import mesh3D
+    from code_MISMIP_plus_3D.domain_structured import mesh3D
 
     with CheckpointFile(filename, "r") as afile:
         thick.assign(afile.load_function(mesh3D, name="thick"))

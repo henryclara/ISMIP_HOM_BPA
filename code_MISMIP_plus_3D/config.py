@@ -9,12 +9,13 @@ nx = int(640)
 ny = int(40)
 nz = int(10)
 
-dts = [2]
+dts = [10]
 theta_outs = [1]
 FSSA_keyword = "full"
-zeta_pred = True
-T = 10100
-output_int = 20
+zeta_pred = False
+time_stepping = "im"
+T = 10000
+output_int = 10
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(20.0)

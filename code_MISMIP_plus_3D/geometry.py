@@ -18,7 +18,7 @@ def mismip_bed(x, y):
 
 
 def reset_state():
-    from domain import x, y
+    from code_MISMIP_plus_3D.domain_structured import x, y
     from fields import bed, zb, thick, zs
     from spaces import mesh3D, xref, yref, sigmaref, w, uvec_out, H, u_prev
 

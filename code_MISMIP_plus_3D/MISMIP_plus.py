@@ -10,7 +10,7 @@ restart_from = f"Simulations/refined_MISMIP_output_theta1_dt1_GL_predFalse_nx_16
 if restart_from is not None:
     os.environ["RESTART_MESH_FILE"] = restart_from
 
-from domain import *
+from code_MISMIP_plus_3D.domain_structured import *
 from fields import *
 from physics import *
 from geometry import *

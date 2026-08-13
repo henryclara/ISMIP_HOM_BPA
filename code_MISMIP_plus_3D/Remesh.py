@@ -15,13 +15,11 @@ from geometry import mismip_bed
 # -----------------------------------------------------------------------------
 
 INPUT_RESTART = Path(
-    "SimulationsOld/MISMIP_output_theta1_dt5_GL_predFalse_nx_80_nz_5/"
-    "restart_t8000.h5"
+    "Simulations/Ice0_theta1_dt1_res2000_1000_nz10/"
+    "restart_t10000.h5"
 )
 
-OUTPUT_RESTART = Path(
-    f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}/restart_t8000.h5"
-)
+OUTPUT_RESTART = Path(f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}/restart_t10000.h5")
 
 # Existing *horizontal* unstructured Gmsh mesh.
 # This mesh is loaded directly; this script does not reconstruct or modify the
@@ -345,37 +343,42 @@ def main():
 
     x_new, y_new, sigma = SpatialCoordinate(new_mesh)
 
+    new_bed.interpolate(
+        mismip_bed(x_new, y_new)
+    )
+
+    print(
+        "New bed range:",
+        new_bed.dat.data_ro.min(),
+        new_bed.dat.data_ro.max(),
+    )
+
+    # ---------------------------------------------------------
+    # Reconstruct lower and upper ice surfaces
+    # ---------------------------------------------------------
+
     zb_float = -(rhoi / rhow) * new_thick
 
+    # Grounded ice: zb = bed
+    # Floating ice: zb = hydrostatic flotation depth
     new_zb.interpolate(
-        max_value(
-            new_bed,
-            zb_float,
-        )
+        max_value(new_bed, zb_float)
     )
 
     new_zs.interpolate(
         new_zb + new_thick
     )
 
-    # ---------------------------------------------------------
-    # Reconstruct the lower ice surface
-    # ---------------------------------------------------------
-
-    zb_float = -(rhoi / rhow) * new_thick
-
-    # Grounded: zb = bed
-    # Floating: zb = hydrostatic flotation depth
-    new_zb.interpolate(
-        max_value(
-            new_bed,
-            zb_float,
-        )
+    print(
+        "New zb range:",
+        new_zb.dat.data_ro.min(),
+        new_zb.dat.data_ro.max(),
     )
 
-    # Surface follows directly
-    new_zs.interpolate(
-        new_zb + new_thick
+    print(
+        "New zs range:",
+        new_zs.dat.data_ro.min(),
+        new_zs.dat.data_ro.max(),
     )
 
     # ------------------------------------------------------------------

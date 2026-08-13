@@ -4,16 +4,15 @@ import numpy as np
 Lx = 640000.0
 Ly_full = 80000.0
 Ly = Ly_full / 2.0
-
 nz = int(10)
 
-dts = [0.1]
+dts = [1]
 theta_outs = [1]
 FSSA_keyword = "full"
 zeta_pred = False
 time_stepping = "im"
 T = 8500
-output_int = 0.1
+output_int = 100
 coarse_res = 4000.0
 refined_res = 4000.0
 exp_name = "Ice0" # "Ice1rr", "Ice1ra"

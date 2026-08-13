@@ -26,6 +26,7 @@ from geometry import *
 from spaces import *
 from bcs import *
 from io_local import *
+import ufl
 
 Q1 = FunctionSpace(mesh3D, "CG", 1)
 
@@ -78,7 +79,7 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(refined_res)}_nz{nz}")
+        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         theta = Constant(theta_out)
@@ -123,8 +124,11 @@ for dt in dts:
 
             cavity_thickness = max_value(zb - bed, 0.0)
 
-            a_b_Ice1r = (Constant(0.2) * tanh(cavity_thickness / Constant(75.0)) \
-                                    * max_value(-Constant(100.0) - zb, Constant(0.0)))
+            if exp_name == "Ice1rr" or (exp_name == "Ice1ra" and t<10100):
+                a_b_Ice1r = (Constant(0.2) * tanh(cavity_thickness / Constant(75.0)) \
+                                        * max_value(-Constant(100.0) - zb, Constant(0.0)))
+            else:
+                a_b_Ice1r = Constant(0.0)
 
             surf = 1 / sqrt(1 + zs.dx(0)**2 + zs.dx(1)**2)
 
@@ -213,59 +217,13 @@ for dt in dts:
 
             vel = as_vector([ux_bar, uy_bar])
             vnorm = sqrt(dot(vel, vel) + 1e-10)
-            #h = CellDiameter(base)
-            #h = Constant(Lx / nx)
 
-            #x, y, z = SpatialCoordinate(mesh3D)
-
-            #h_x = conditional(x < Constant(400000.0), Constant(2000.0), \
-            #    conditional(x <= Constant(500000.0),Constant(refined_res),Constant(2000.0)))
-            #h_y = conditional(x < Constant(400000.0), Constant(2000.0), \
-            #     conditional(x <= Constant(500000.0),Constant(refined_res),Constant(2000.0)))
-
-            #C_art = Constant(0.2)
-            #eps_u = Constant(1.0e-10)
-
-            #mu_x = C_art * h_x * sqrt(ux_bar**2 + eps_u**2)
-            #mu_y = C_art * h_y * sqrt(uy_bar**2 + eps_u**2)
-
-            import ufl
-
-            # Jacobian mapping from the reference prism to the physical element.
             J = ufl.Jacobian(mesh3D)
 
-            # For the reference triangle, the horizontal vertices can be taken as
-            #
-            #     (0, 0), (1, 0), (0, 1).
-            #
-            # Relative to the first vertex, their physical x coordinates are therefore
-            #
-            #     0, J[0, 0], J[0, 1]
-            #
-            # and their physical y coordinates are
-            #
-            #     0, J[1, 0], J[1, 1].
-
-            xmax = max_value(
-                0.0,
-                max_value(J[0, 0], J[0, 1]),
-            )
-
-            xmin = min_value(
-                0.0,
-                min_value(J[0, 0], J[0, 1]),
-            )
-
-            ymax = max_value(
-                0.0,
-                max_value(J[1, 0], J[1, 1]),
-            )
-
-            ymin = min_value(
-                0.0,
-                min_value(J[1, 0], J[1, 1]),
-            )
-
+            xmax = max_value(0.0, max_value(J[0, 0], J[0, 1]))
+            xmin = min_value(0.0, min_value(J[0, 0], J[0, 1]))
+            ymax = max_value(0.0,max_value(J[1, 0], J[1, 1]))
+            ymin = min_value(0.0,min_value(J[1, 0], J[1, 1]))
             h_x = xmax - xmin
             h_y = ymax - ymin
 

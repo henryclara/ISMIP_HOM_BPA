@@ -269,7 +269,7 @@ for dt in dts:
             h_x = xmax - xmin
             h_y = ymax - ymin
 
-            C_art = Constant(5)
+            C_art = Constant(0.1)
             eps_u = Constant(1.0e-10)
 
             mu_x = (C_art * h_x * sqrt(ux_bar**2 + eps_u**2))

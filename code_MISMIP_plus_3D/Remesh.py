@@ -8,6 +8,7 @@ from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 
 from firedrake import *
 from config import *
+from geometry import mismip_bed
 
 # -----------------------------------------------------------------------------
 # USER SETTINGS
@@ -26,26 +27,6 @@ OUTPUT_RESTART = Path(
 # This mesh is loaded directly; this script does not reconstruct or modify the
 # horizontal triangulation.
 TARGET_BASE_MESH = Path(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}.msh")
-
-base = Mesh(
-    f"Meshes/mesh_res_{int(coarse_res)}_{int(refined_res)}.msh"
-)
-
-print(
-    "BASE MESH BOUNDARY MARKERS:",
-    base.exterior_facets.unique_markers,
-)
-
-mesh3D = ExtrudedMesh(
-    base,
-    layers=nz,
-    layer_height=1.0 / nz,
-)
-
-print(
-    "EXTRUDED SIDE BOUNDARY MARKERS:",
-    mesh3D.exterior_facets.unique_markers,
-)
 
 # Number of vertical layers used when extruding the supplied horizontal mesh.
 NZ = 10
@@ -115,12 +96,29 @@ def interpolate_values(source_points, source_values, target_points, label="field
         missing = ~np.all(np.isfinite(result), axis=1)
 
     nmissing = int(np.count_nonzero(missing))
+
     if nmissing:
+        fraction = nmissing / len(target_points)
+
         print(
-            f"  {label}: {nmissing}/{len(target_points)} target points "
-            "outside linear interpolation hull; using nearest neighbour"
+            f"  {label}: {nmissing}/{len(target_points)} "
+            f"({100.0*fraction:.3f}%) target points "
+            "outside linear interpolation hull"
         )
-        nearest = NearestNDInterpolator(source_scaled, source_values)
+
+        # A tiny number can occur from boundary roundoff.
+        # A significant fraction means the meshes do not overlap correctly.
+        if fraction > 0.01:
+            raise RuntimeError(
+                f"{label}: too many target points are outside the "
+                "source interpolation hull. Check the source/target "
+                "coordinate systems."
+            )
+
+        nearest = NearestNDInterpolator(
+            source_scaled,
+            source_values,
+        )
         result[missing] = nearest(target_scaled[missing])
 
     return result
@@ -233,11 +231,30 @@ def main():
         old_w = checkpoint.load_function(old_mesh, "w")
         old_uvec_out = checkpoint.load_function(old_mesh, "uvec_out")
 
-    # ------------------------------------------------------------------
-    # Load the supplied fine unstructured horizontal mesh, then extrude it in
-    # reference sigma coordinates 0 <= sigma <= 1.
-    # ------------------------------------------------------------------
     base_mesh = load_target_base_mesh()
+
+    # The Gmsh mesh is generated on y in [0, Ly], whereas the original
+    # MISMIP+ half-domain uses y in [Ly_full/2, Ly_full].
+    coords = base_mesh.coordinates.dat.data
+
+    print(
+        "Target y-range before shift:",
+        coords[:, 1].min(),
+        coords[:, 1].max(),
+    )
+
+    coords[:, 1] += float(Ly_full / 2.0)
+
+    print(
+        "Target y-range after shift:",
+        coords[:, 1].min(),
+        coords[:, 1].max(),
+    )
+
+    print(
+        "BASE MESH BOUNDARY MARKERS:",
+        base_mesh.exterior_facets.unique_markers,
+    )
 
     new_mesh = ExtrudedMesh(
         base_mesh,
@@ -245,6 +262,10 @@ def main():
         layer_height=1.0 / NZ,
     )
 
+    print(
+        "EXTRUDED SIDE BOUNDARY MARKERS:",
+        new_mesh.exterior_facets.unique_markers,
+    )
     # Same element choices as the current MISMIP+ scripts.
     horizontal_element = FiniteElement("CG", "triangle", 1)
     vertical_element = FiniteElement("CG", "interval", 1)
@@ -292,6 +313,18 @@ def main():
     print("Interpolating horizontal geometry fields")
     old_xy = coordinates_2d(old_Vbar)
     new_xy = coordinates_2d(new_Vbar)
+
+    print(
+        "OLD coordinate ranges:",
+        f"x=[{old_xy[:,0].min()}, {old_xy[:,0].max()}]",
+        f"y=[{old_xy[:,1].min()}, {old_xy[:,1].max()}]",
+    )
+
+    print(
+        "NEW coordinate ranges:",
+        f"x=[{new_xy[:,0].min()}, {new_xy[:,0].max()}]",
+        f"y=[{new_xy[:,1].min()}, {new_xy[:,1].max()}]",
+    )
 
     # Interpolate thickness only
     new_thick.dat.data[:] = interpolate_values(

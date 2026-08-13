@@ -12,10 +12,10 @@ theta_outs = [1]
 FSSA_keyword = "full"
 zeta_pred = False
 time_stepping = "im"
-T = 9010
-output_int = 1
-coarse_res = 2000.0
-refined_res = 1000.0
+T = 8500
+output_int = 0.1
+coarse_res = 4000.0
+refined_res = 4000.0
 exp_name = "Ice0" # "Ice1rr", "Ice1ra"
 restart_from = f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}/restart_t8000.h5"
 

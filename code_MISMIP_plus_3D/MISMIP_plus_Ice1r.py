@@ -216,19 +216,64 @@ for dt in dts:
             #h = CellDiameter(base)
             #h = Constant(Lx / nx)
 
-            x, y, z = SpatialCoordinate(mesh3D)
+            #x, y, z = SpatialCoordinate(mesh3D)
 
-            h_x = conditional(x < Constant(400000.0), Constant(2000.0), \
-                conditional(x <= Constant(500000.0),Constant(refined_res),Constant(2000.0)))
+            #h_x = conditional(x < Constant(400000.0), Constant(2000.0), \
+            #    conditional(x <= Constant(500000.0),Constant(refined_res),Constant(2000.0)))
+            #h_y = conditional(x < Constant(400000.0), Constant(2000.0), \
+            #     conditional(x <= Constant(500000.0),Constant(refined_res),Constant(2000.0)))
 
-            h_y = Constant(2000.0)
+            #C_art = Constant(0.2)
+            #eps_u = Constant(1.0e-10)
 
-            C_art = Constant(0.2)
+            #mu_x = C_art * h_x * sqrt(ux_bar**2 + eps_u**2)
+            #mu_y = C_art * h_y * sqrt(uy_bar**2 + eps_u**2)
 
+            import ufl
+
+            # Jacobian mapping from the reference prism to the physical element.
+            J = ufl.Jacobian(mesh3D)
+
+            # For the reference triangle, the horizontal vertices can be taken as
+            #
+            #     (0, 0), (1, 0), (0, 1).
+            #
+            # Relative to the first vertex, their physical x coordinates are therefore
+            #
+            #     0, J[0, 0], J[0, 1]
+            #
+            # and their physical y coordinates are
+            #
+            #     0, J[1, 0], J[1, 1].
+
+            xmax = max_value(
+                0.0,
+                max_value(J[0, 0], J[0, 1]),
+            )
+
+            xmin = min_value(
+                0.0,
+                min_value(J[0, 0], J[0, 1]),
+            )
+
+            ymax = max_value(
+                0.0,
+                max_value(J[1, 0], J[1, 1]),
+            )
+
+            ymin = min_value(
+                0.0,
+                min_value(J[1, 0], J[1, 1]),
+            )
+
+            h_x = xmax - xmin
+            h_y = ymax - ymin
+
+            C_art = Constant(5)
             eps_u = Constant(1.0e-10)
 
-            mu_x = C_art * h_x * sqrt(ux_bar**2 + eps_u**2)
-            mu_y = C_art * h_y * sqrt(uy_bar**2 + eps_u**2)
+            mu_x = (C_art * h_x * sqrt(ux_bar**2 + eps_u**2))
+            mu_y = (C_art * h_y * sqrt(uy_bar**2 + eps_u**2))
 
             z_ref = Function(Q1, name="z_ref")
             z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
@@ -244,10 +289,8 @@ for dt in dts:
                     + dt * (uy_bar * thick_new).dx(1) * phi * dx
                     - dt * (a_s - a_b_Ice1r) * phi * dx
                     # Artificial viscosity
-                    + dt * (
-                        mu_x * thick_new.dx(0) * phi.dx(0)
-                        + mu_y * thick_new.dx(1) * phi.dx(1)
-                    ) * dx
+                    + dt * (mu_x * thick_new.dx(0) * phi.dx(0)
+                          + mu_y * thick_new.dx(1) * phi.dx(1)) * dx
                 )
 
             elif time_stepping == "im_mi":

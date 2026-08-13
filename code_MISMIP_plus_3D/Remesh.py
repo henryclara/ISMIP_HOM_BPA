@@ -25,13 +25,32 @@ OUTPUT_RESTART = Path(
 # Existing *horizontal* unstructured Gmsh mesh.
 # This mesh is loaded directly; this script does not reconstruct or modify the
 # horizontal triangulation.
-TARGET_BASE_MESH = Path("Meshes/mesh_res_2000_1000.msh")
+TARGET_BASE_MESH = Path(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}.msh")
+
+base = Mesh(
+    f"Meshes/mesh_res_{int(coarse_res)}_{int(refined_res)}.msh"
+)
+
+print(
+    "BASE MESH BOUNDARY MARKERS:",
+    base.exterior_facets.unique_markers,
+)
+
+mesh3D = ExtrudedMesh(
+    base,
+    layers=nz,
+    layer_height=1.0 / nz,
+)
+
+print(
+    "EXTRUDED SIDE BOUNDARY MARKERS:",
+    mesh3D.exterior_facets.unique_markers,
+)
 
 # Number of vertical layers used when extruding the supplied horizontal mesh.
 NZ = 10
 
 MINIMUM_THICKNESS = 10.0
-
 
 # -----------------------------------------------------------------------------
 # TARGET MESH
@@ -261,6 +280,7 @@ def main():
     new_W = new_VV * new_VVbar
 
     new_thick = Function(new_Vbar, name="thick")
+    new_bed = Function(new_Vbar, name="bed")
     new_zb = Function(new_Vbar, name="zb")
     new_zs = Function(new_Vbar, name="zs")
     new_w = Function(new_W, name="w")
@@ -273,6 +293,7 @@ def main():
     old_xy = coordinates_2d(old_Vbar)
     new_xy = coordinates_2d(new_Vbar)
 
+    # Interpolate thickness only
     new_thick.dat.data[:] = interpolate_values(
         old_xy,
         old_thick.dat.data_ro,
@@ -280,19 +301,49 @@ def main():
         label="thick",
     )
 
-    new_zb.dat.data[:] = interpolate_values(
-        old_xy,
-        old_zb.dat.data_ro,
-        new_xy,
-        label="zb",
+    new_thick.dat.data[:] = np.maximum(
+        new_thick.dat.data,
+        MINIMUM_THICKNESS,
     )
 
-    # Avoid invalid columns if linear interpolation introduces a tiny local
-    # undershoot near the margin.
-    new_thick.dat.data[:] = np.maximum(new_thick.dat.data, MINIMUM_THICKNESS)
+    # ---------------------------------------------------------
+    # Evaluate the analytical bedrock on the NEW mesh
+    # ---------------------------------------------------------
 
-    # Reconstruct zs exactly so zb + H = zs remains internally consistent.
-    new_zs.interpolate(new_zb + new_thick)
+    x_new, y_new, sigma = SpatialCoordinate(new_mesh)
+
+    zb_float = -(rhoi / rhow) * new_thick
+
+    new_zb.interpolate(
+        max_value(
+            new_bed,
+            zb_float,
+        )
+    )
+
+    new_zs.interpolate(
+        new_zb + new_thick
+    )
+
+    # ---------------------------------------------------------
+    # Reconstruct the lower ice surface
+    # ---------------------------------------------------------
+
+    zb_float = -(rhoi / rhow) * new_thick
+
+    # Grounded: zb = bed
+    # Floating: zb = hydrostatic flotation depth
+    new_zb.interpolate(
+        max_value(
+            new_bed,
+            zb_float,
+        )
+    )
+
+    # Surface follows directly
+    new_zs.interpolate(
+        new_zb + new_thick
+    )
 
     # ------------------------------------------------------------------
     # 2. Velocity transfer in (x, y, sigma).
@@ -350,6 +401,7 @@ def main():
     with CheckpointFile(str(OUTPUT_RESTART), "w") as checkpoint:
         checkpoint.save_mesh(new_mesh)
         checkpoint.save_function(new_thick, name="thick")
+        checkpoint.save_function(new_bed, name="bed")
         checkpoint.save_function(new_zb, name="zb")
         checkpoint.save_function(new_zs, name="zs")
         checkpoint.save_function(new_w, name="w")

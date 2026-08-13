@@ -1,19 +1,24 @@
-from pyclbr import Function
-
-from firedrake import *
-import numpy as np
 import os
+
+# Must be set BEFORE importing Firedrake.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+import numpy as np
 from pathlib import Path
-from config import *
 from datetime import datetime
 
+from firedrake import *
+from config import *
+
 # ------------------------------------------------------------
-# Read the initial state from the original MISMIP+ experiment.
+# Tell domain.py which checkpoint mesh to use when restarting.
+# This must happen BEFORE importing fields/spaces/geometry/etc.
 # ------------------------------------------------------------
 
-restart_from = None #f"Simulations/remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_res_250_nz_10/restart_t10000.h5"
-
-os.environ["RESTART_MESH_FILE"] = str(restart_from)
+if restart_from is not None:
+    os.environ["RESTART_MESH_FILE"] = str(restart_from)
+else:
+    os.environ.pop("RESTART_MESH_FILE", None)
 
 from fields import *
 from physics import *
@@ -73,12 +78,12 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = Path(f"Simulations/MISMIP_Ice1r_theta{theta_out:g}_dt{dt:g}_GL_pred{zeta_pred}_unstrucured_test")
+        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(refined_res)}_nz{nz}")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         theta = Constant(theta_out)
         num_TS = int(T / dt)
-        outfile = VTKFile(str(run_dir / "Ice1r.pvd"))
+        outfile = VTKFile(str(run_dir / f"{exp_name}.pvd"))
 
         if theta_out == 0:
             uvec = Function(VV)
@@ -209,12 +214,12 @@ for dt in dts:
             vel = as_vector([ux_bar, uy_bar])
             vnorm = sqrt(dot(vel, vel) + 1e-10)
             #h = CellDiameter(base)
-            h = Constant(Lx / nx)
+            #h = Constant(Lx / nx)
 
             x, y, z = SpatialCoordinate(mesh3D)
 
             h_x = conditional(x < Constant(400000.0), Constant(2000.0), \
-                conditional(x <= Constant(500000.0),Constant(100.0),Constant(2000.0),))
+                conditional(x <= Constant(500000.0),Constant(refined_res),Constant(2000.0)))
 
             h_y = Constant(2000.0)
 

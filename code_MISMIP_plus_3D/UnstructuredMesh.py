@@ -1,4 +1,5 @@
 import gmsh
+import os
 
 gmsh.initialize()
 gmsh.model.add("refined_rectangle")
@@ -6,11 +7,15 @@ gmsh.model.add("refined_rectangle")
 # --------------------------------------------------
 # Domain dimensions [m]
 # --------------------------------------------------
-Lx = 640000.0
-Ly = 40000.0
+from config import *
 
-h_coarse = 2000.0
-h_fine = 500.0
+# Use domain sizes from config when available
+Lx = float(Lx)
+Ly = float(Ly)
+
+# Use resolution settings from config to name the mesh file
+h_coarse = float(coarse_res)
+h_fine = float(refined_res)
 
 x_ref_min = 400000.0
 x_ref_max = 500000.0
@@ -160,8 +165,10 @@ gmsh.option.setNumber(
 # --------------------------------------------------
 gmsh.model.mesh.generate(2)
 
-gmsh.write("mesh_res_2000_500.msh")
+gmsh.write("Meshes/mesh_res_" + str(int(h_coarse)) + "_" + str(int(h_fine)) + ".msh")
 
-gmsh.fltk.run()
+# Run the FLTK GUI only if explicitly requested via environment variable.
+if os.environ.get("GMESH_GUI", "0") == "1":
+    gmsh.fltk.run()
 
 gmsh.finalize()

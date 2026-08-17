@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import csv
-import glob
 import re
 
 
@@ -13,43 +12,62 @@ import re
 # Configuration
 # ---------------------------------------------------------------------
 
-T = 10100
-
+times = [10100, 10200]
 theta = 1
-resolutions = [250, 500]
-zeta_pred = False
 
-# SEP3 runs only.
-dts = [1, 2, 5, 10, 20]
+# These are the six dt values visible in the screenshot.
+dts = [0.1, 1, 2, 5, 10, 20]
 
-# Reference solution.
-ref_dt = 1
+# Use the smallest timestep in each run family as that family's reference.
+# Its error is exactly zero, so it is used as input but is not shown on a
+# logarithmic error plot.
+ref_dt = 0.1
 
-# Ignore locations where the reference thickness is <= this value.
 H_min = 10.0
-
 simulation_directory = "Simulations"
-
 figure_dpi = 700
 
-dt_figure_filename = (
-    f"{simulation_directory}/"
-    f"MISMIP_Ice1r_SEP3_L2_error_vs_dt_dx250_dx500.png"
+# The three folder families visible in the screenshot.  For each family the
+# complete directory name is
+#
+#   Ice1r_theta1_dt<dt>_<folder_suffix>
+#
+run_families = [
+    #{
+    #   "key": "res2000_1000_im_mi",
+    #    "folder_suffix": "res2000_1000_nz10_time_stepping_im_mi",
+    #    "label": r"res2000\_1000, IM/MI",
+    #},
+    {
+        "key": "res2000_1000",
+        "folder_suffix": "res2000_1000_nz10",
+        "label": r"$\Delta x_\mathrm{f} = 1000$",
+    },
+    {
+        "key": "res2000_500",
+        "folder_suffix": "res2000_500_nz10",
+        "label": r"$\Delta x_\mathrm{f} = 500$",
+    },
+]
+
+dt_figure_filename = os.path.join(
+    simulation_directory,
+    "Ice1r_T200_T10100_T10200_L2_error_vs_dt.png",
 )
 
-runtime_figure_filename = (
-    f"{simulation_directory}/"
-    f"MISMIP_Ice1r_SEP3_L2_error_vs_runtime_dx250_dx500.png"
+runtime_figure_filename = os.path.join(
+    simulation_directory,
+    "Ice1r_T200_T10100_T10200_L2_error_vs_runtime.png",
 )
 
-csv_filename = (
-    f"{simulation_directory}/"
-    f"MISMIP_Ice1r_SEP3_L2_error_dx250_dx500.csv"
+csv_filename = os.path.join(
+    simulation_directory,
+    "Ice1r_T200_T10100_T10200_L2_error.csv",
 )
 
-runtime_log_filename = (
-    f"{simulation_directory}/"
-    f"MISMIP_Ice1r_simulation_times.txt"
+runtime_log_filename = os.path.join(
+    simulation_directory,
+    "MISMIP_Ice1r_simulation_times.txt",
 )
 
 
@@ -57,29 +75,33 @@ runtime_log_filename = (
 # Restart-file discovery
 # ---------------------------------------------------------------------
 
-def find_restart_file(dt, resolution):
+def run_directory_name(dt, family):
+    """Return the exact folder name for one screenshot run."""
+    return (
+        f"Ice1rr_theta{theta:g}_dt{dt:g}_"
+        f"{family['folder_suffix']}"
+    )
 
+
+def find_restart_file(T, dt, family):
+    folder_name = run_directory_name(dt, family)
     filename = os.path.join(
         simulation_directory,
-        (
-            f"MISMIP_Ice1r_theta{theta:g}_dt{dt:g}_"
-            f"GL_pred{zeta_pred}_res_{resolution}_GL_SEP3"
-        ),
+        folder_name,
         f"restart_t{T:g}.h5",
     )
 
     if not os.path.exists(filename):
-
         raise FileNotFoundError(
-            f"Restart file not found:{filename}"
+            "Restart file not found:\n"
+            f"  {filename}\n"
+            "Check simulation_directory, T, and the folder names."
         )
 
     print(
-        f"dx={resolution:g} m, dt={dt:g}: "
-        f"using restart file"
+        f"{family['key']}, dt={dt:g}: using restart file\n"
         f"  {filename}"
     )
-
     return filename
 
 
@@ -87,50 +109,37 @@ def find_restart_file(dt, resolution):
 # Load one simulation state
 # ---------------------------------------------------------------------
 
-def load_state(dt, resolution):
-
-    filename = find_restart_file(dt, resolution)
+def load_state(T, dt, family):
+    filename = find_restart_file(T, dt, family)
 
     with CheckpointFile(filename, "r") as afile:
-
         try:
-
             mesh = afile.load_mesh(
                 name="firedrake_default_extruded",
                 reorder=False,
             )
-
         except Exception:
-
             mesh_names = list(
                 afile._get_mesh_name_topology_name_map().keys()
             )
 
             if not mesh_names:
-
                 raise RuntimeError(
                     f"No mesh found in checkpoint {filename}"
                 )
 
             extruded = [
-                name
-                for name in mesh_names
+                name for name in mesh_names
                 if "extruded" in name.lower()
             ]
 
             if extruded:
-
                 mesh_name = extruded[0]
-
             elif len(mesh_names) == 1:
-
                 mesh_name = mesh_names[0]
-
             else:
-
                 raise RuntimeError(
-                    f"Several meshes found in {filename}: "
-                    f"{mesh_names}"
+                    f"Several meshes found in {filename}: {mesh_names}"
                 )
 
             mesh = afile.load_mesh(
@@ -138,15 +147,8 @@ def load_state(dt, resolution):
                 reorder=False,
             )
 
-        H = afile.load_function(
-            mesh,
-            "thick",
-        )
-
-        zs = afile.load_function(
-            mesh,
-            "zs",
-        )
+        H = afile.load_function(mesh, "thick")
+        zs = afile.load_function(mesh, "zs")
 
     return mesh, H, zs
 
@@ -155,20 +157,12 @@ def load_state(dt, resolution):
 # Absolute L2 thickness error
 # ---------------------------------------------------------------------
 
-def L2_error(
-    H,
-    Href,
-    zs,
-    h_min=10.0,
-):
+def L2_error(H, Href, zs, h_min=10.0):
     """
     Absolute L2 error in ice thickness:
 
         ||H - Href||_L2
-        =
-        sqrt(
-            integral (H - Href)^2 dA
-        )
+        = sqrt(integral (H - Href)^2 dA)
 
     where dA is horizontal plan-view area.
 
@@ -176,27 +170,21 @@ def L2_error(
     """
 
     if H.dat.data_ro.size != Href.dat.data_ro.size:
-
         raise ValueError(
-            "Reference and test thickness fields have "
-            "different numbers of degrees of freedom."
+            "Reference and test thickness fields have different numbers "
+            "of degrees of freedom.  Each run family must use a reference "
+            "on the same mesh/discretisation."
         )
 
-    # Put reference data into the current function space.
     Href_on_H = Function(
         H.function_space(),
         name="Href_on_H",
     )
-
     Href_on_H.dat.data[:] = Href.dat.data_ro[:]
 
-    # Vertical component of the upper-surface unit normal.
-    #
-    # n_z * ds_t = horizontal plan-view area.
+    # n_z * ds_t is horizontal plan-view area.
     n_z = 1.0 / sqrt(
-        1.0
-        + zs.dx(0)**2
-        + zs.dx(1)**2
+        1.0 + zs.dx(0)**2 + zs.dx(1)**2
     )
 
     error_squared = conditional(
@@ -206,16 +194,10 @@ def L2_error(
     )
 
     integral_error_squared = assemble(
-        error_squared
-        * n_z
-        * ds_t
+        error_squared * n_z * ds_t
     )
 
-    return float(
-        np.sqrt(
-            integral_error_squared
-        )
-    )
+    return float(np.sqrt(integral_error_squared))
 
 
 # ---------------------------------------------------------------------
@@ -223,138 +205,121 @@ def L2_error(
 # ---------------------------------------------------------------------
 
 def runtime_to_seconds(runtime_text):
-
     parts = runtime_text.strip().split(":")
-
     if len(parts) != 3:
-
         raise ValueError(
-            f"Unexpected runtime format: "
-            f"{runtime_text}"
+            f"Unexpected runtime format: {runtime_text}"
         )
 
     hours = int(parts[0])
     minutes = int(parts[1])
     seconds = float(parts[2])
+    return 3600.0 * hours + 60.0 * minutes + seconds
 
-    return (
-        3600.0 * hours
-        + 60.0 * minutes
-        + seconds
+
+def identify_family_from_runtime_line(line, dt_value):
+    """
+    Try to associate a runtime-log line with one screenshot folder family.
+
+    Best case: the line contains the folder suffix itself.  As a fallback,
+    resolution=500 is assigned to res2000_500.  resolution=1000 is assigned
+    to the ordinary res2000_1000 run unless the line also contains
+    'time_stepping_im_mi'.
+    """
+
+    # Exact folder/family text is unambiguous.
+    for family in run_families:
+        full_folder = run_directory_name(dt_value, family)
+        if (
+            family["folder_suffix"] in line
+            or full_folder in line
+        ):
+            return family["key"]
+
+    resolution_match = re.search(
+        r"resolution=(?P<resolution>[^,\s]+)",
+        line,
     )
+    if resolution_match is None:
+        return None
+
+    token = resolution_match.group("resolution")
+
+    if token in {"500", "2000_500"}:
+        return "res2000_500"
+
+    if token in {"1000", "2000_1000"}:
+        if "time_stepping_im_mi" in line:
+            return "res2000_1000_im_mi"
+        return "res2000_1000"
+
+    return None
 
 
 def load_runtime_records(filename):
+    """
+    Read runtime records when they can be matched to a run family.
+
+    If the log is absent, or if a line cannot distinguish the run family,
+    the L2-vs-dt figure is still produced; only the runtime point is omitted.
+    """
 
     if not os.path.exists(filename):
-
-        raise FileNotFoundError(
-            f"Runtime log not found: "
-            f"{filename}"
+        print(
+            "Warning: runtime log not found; the runtime figure will be "
+            f"skipped unless runtime data are available:\n  {filename}"
         )
+        return {}
 
-    # Supports both:
-    #
-    # dt=..., theta_out=..., resolution=250, T_start=..., T_end=..., ...
-    #
-    # and older lines without a resolution field. Older lines cannot be
-    # assigned safely once more than one resolution is present, so they are
-    # ignored for the runtime panels.
     pattern = re.compile(
         r"dt=(?P<dt>[-+0-9.eE]+),\s*"
         r"theta_out=(?P<theta>[-+0-9.eE]+),\s*"
-        r"(?:resolution=(?P<resolution>\d+),\s*)?"
-        r"T_start=(?P<T_start>[-+0-9.eE]+),\s*"
+        r".*?"
         r"T_end=(?P<T_end>[-+0-9.eE]+),.*?"
         r"runtime=(?P<runtime>\d+:\d+:\d+(?:\.\d+)?)"
     )
 
     records = {}
 
-    with open(
-        filename,
-        "r",
-        encoding="utf-8",
-    ) as runtime_file:
-
-        for line_number, line in enumerate(
-            runtime_file,
-            start=1,
-        ):
-
-            match = pattern.search(
-                line.strip()
-            )
-
+    with open(filename, "r", encoding="utf-8") as runtime_file:
+        for line_number, line in enumerate(runtime_file, start=1):
+            stripped = line.strip()
+            match = pattern.search(stripped)
             if match is None:
                 continue
 
-            dt_value = float(
-                match.group("dt")
-            )
+            dt_value = float(match.group("dt"))
+            theta_value = float(match.group("theta"))
+            T_end = float(match.group("T_end"))
+            runtime_text = match.group("runtime")
 
-            theta_value = float(
-                match.group("theta")
-            )
-
-            T_end = float(
-                match.group("T_end")
-            )
-
-            runtime_text = match.group(
-                "runtime"
-            )
-
-            resolution_text = match.group(
-                "resolution"
-            )
-
-            if not np.isclose(
-                theta_value,
-                theta,
-            ):
+            if not np.isclose(theta_value, theta):
+                continue
+            if not any(np.isclose(T_end, T_value) for T_value in times):
                 continue
 
-            if not np.isclose(
-                T_end,
-                T,
-            ):
-                continue
-
-            # Once we compare multiple resolutions, runtime lines must
-            # include the resolution explicitly.
-            if resolution_text is None:
-                print(
-                    f"Warning: runtime-log line {line_number} has no "
-                    "resolution field; skipping it."
-                )
-                continue
-
-            resolution_value = int(
-                resolution_text
-            )
-
-            if resolution_value not in resolutions:
-                continue
-
-            key = (
-                resolution_value,
+            family_key = identify_family_from_runtime_line(
+                stripped,
                 dt_value,
             )
 
-            records[key] = {
+            if family_key is None:
+                print(
+                    f"Warning: runtime-log line {line_number} could not "
+                    "be assigned to one of the screenshot run families; "
+                    "skipping it."
+                )
+                continue
+
+            records[(family_key, float(T_end), float(dt_value))] = {
                 "runtime_text": runtime_text,
-                "runtime_seconds": runtime_to_seconds(
-                    runtime_text
-                ),
+                "runtime_seconds": runtime_to_seconds(runtime_text),
                 "line_number": line_number,
             }
 
     print(
-        f"Read {len(records)} matching runtime records "
-        f"from {filename}"
+        f"Read {len(records)} matching runtime records from {filename}"
     )
-
     return records
 
 
@@ -363,15 +328,7 @@ def load_runtime_records(filename):
 # ---------------------------------------------------------------------
 
 def main():
-
-    os.makedirs(
-        simulation_directory,
-        exist_ok=True,
-    )
-
-    # -------------------------------------------------------------
-    # Read runtimes
-    # -------------------------------------------------------------
+    os.makedirs(simulation_directory, exist_ok=True)
 
     runtime_records = load_runtime_records(
         runtime_log_filename
@@ -380,125 +337,104 @@ def main():
     all_rows = []
 
     # -------------------------------------------------------------
-    # Compute L2 error separately for each resolution
+    # Compute L2 error separately for each screenshot run family and time.
+    # Each (family, T) pair gets its own dt=0.1 reference.
     # -------------------------------------------------------------
 
-    for resolution in resolutions:
+    for family in run_families:
+        print("\n" + "=" * 78)
+        print(f"Processing {family['key']}")
+        print("=" * 78)
 
-        print("\n" + "=" * 72)
-        print(
-            f"Processing resolution = {resolution:g} m"
-        )
-        print("=" * 72)
-
-        # Each resolution gets its own dt = ref_dt reference.
-        _, Href, _ = load_state(
-            ref_dt,
-            resolution,
-        )
-
-        print(
-            f"\nReference solution: "
-            f"SEP3, dx={resolution:g} m, "
-            f"dt={ref_dt:g} a, T={T:g} a"
-        )
-
-        print(
-            f"Reference thickness range: "
-            f"{np.min(Href.dat.data_ro):.3f} to "
-            f"{np.max(Href.dat.data_ro):.3f} m\n"
-        )
-
-        for dt in dts:
-
-            if np.isclose(
-                dt,
-                ref_dt,
-            ):
-                continue
+        for T in times:
+            print("\n" + "-" * 78)
+            print(f"T = {T:g} a")
+            print("-" * 78)
 
             try:
-
-                _, H, zs = load_state(
-                    dt,
-                    resolution,
-                )
-
-            except (
-                FileNotFoundError,
-                RuntimeError,
-            ) as exc:
-
+                _, Href, _ = load_state(T, ref_dt, family)
+            except (FileNotFoundError, RuntimeError) as exc:
+                print(f"Warning: {exc}")
                 print(
-                    f"Warning: {exc}"
+                    f"Skipping {family['key']} at T={T:g} because its "
+                    f"dt={ref_dt:g} reference is unavailable."
                 )
-
+                print(
+                    "Expected reference path:\n"
+                    f"  {os.path.join(simulation_directory, run_directory_name(ref_dt, family), f'restart_t{T:g}.h5')}"
+                )
                 continue
 
-            error = L2_error(
-                H,
-                Href,
-                zs,
-                h_min=H_min,
+            print(
+                f"\nReference solution: {family['key']}, "
+                f"T={T:g} a, dt={ref_dt:g} a"
+            )
+            print(
+                "Reference thickness range: "
+                f"{np.min(Href.dat.data_ro):.3f} to "
+                f"{np.max(Href.dat.data_ro):.3f} m\n"
             )
 
-            runtime_record = runtime_records.get(
-                (
-                    resolution,
-                    float(dt),
+            for dt in dts:
+                if np.isclose(dt, ref_dt):
+                    # This directory is still used: it supplies Href.
+                    continue
+
+                try:
+                    _, H, zs = load_state(T, dt, family)
+                except (FileNotFoundError, RuntimeError) as exc:
+                    print(f"Warning: {exc}")
+                    continue
+
+                error = L2_error(
+                    H,
+                    Href,
+                    zs,
+                    h_min=H_min,
                 )
-            )
 
-            if runtime_record is None:
+                runtime_record = runtime_records.get(
+                    (family["key"], float(T), float(dt))
+                )
+
+                if runtime_record is None:
+                    runtime_seconds = None
+                    runtime_text = ""
+                else:
+                    runtime_seconds = runtime_record["runtime_seconds"]
+                    runtime_text = runtime_record["runtime_text"]
+
+                all_rows.append({
+                    "T": float(T),
+                    "family_key": family["key"],
+                    "family_label": family["label"],
+                    "folder_suffix": family["folder_suffix"],
+                    "dt": float(dt),
+                    "L2_error": error,
+                    "runtime_seconds": runtime_seconds,
+                    "runtime_text": runtime_text,
+                })
 
                 print(
-                    f"Warning: no runtime found for "
-                    f"dx={resolution:g}, dt={dt:g}"
+                    f"{family['key']}, T={T:g} a, dt={dt:g} a: "
+                    f"L2 error={error:.8e}, "
+                    f"runtime={runtime_text if runtime_text else 'not found'}"
                 )
-
-                runtime_seconds = None
-                runtime_text = ""
-
-            else:
-
-                runtime_seconds = (
-                    runtime_record[
-                        "runtime_seconds"
-                    ]
-                )
-
-                runtime_text = (
-                    runtime_record[
-                        "runtime_text"
-                    ]
-                )
-
-            all_rows.append({
-                "resolution": int(resolution),
-                "dt": float(dt),
-                "L2_error": error,
-                "runtime_seconds": runtime_seconds,
-                "runtime_text": runtime_text,
-            })
-
-            print(
-                f"dx={resolution:g} m, "
-                f"dt={dt:g} a: "
-                f"L2 error={error:.8e}, "
-                f"runtime="
-                f"{runtime_text if runtime_text else 'not found'}"
-            )
 
     if not all_rows:
-
         raise RuntimeError(
-            "No non-reference SEP3 experiments "
-            "were successfully loaded."
+            "No non-reference screenshot experiments were successfully loaded."
         )
+
+    family_order = {
+        family["key"]: i
+        for i, family in enumerate(run_families)
+    }
 
     all_rows.sort(
         key=lambda row: (
-            row["resolution"],
+            family_order[row["family_key"]],
+            row["T"],
             row["dt"],
         )
     )
@@ -513,11 +449,11 @@ def main():
         newline="",
         encoding="utf-8",
     ) as csv_file:
-
         fieldnames = [
             "T",
             "theta",
-            "resolution_m",
+            "run_family",
+            "folder_suffix",
             "reference_dt",
             "dt",
             "H_min_m",
@@ -530,117 +466,171 @@ def main():
             csv_file,
             fieldnames=fieldnames,
         )
-
         writer.writeheader()
 
         for row in all_rows:
-
             writer.writerow({
-                "T": f"{T:g}",
+                "T": f"{row['T']:g}",
                 "theta": f"{theta:g}",
-                "resolution_m":
-                    row["resolution"],
-                "reference_dt":
-                    f"{ref_dt:g}",
-                "dt":
-                    f"{row['dt']:g}",
-                "H_min_m":
-                    f"{H_min:g}",
-                "L2_error":
-                    f"{row['L2_error']:.10e}",
-                "runtime_seconds":
+                "run_family": row["family_key"],
+                "folder_suffix": row["folder_suffix"],
+                "reference_dt": f"{ref_dt:g}",
+                "dt": f"{row['dt']:g}",
+                "H_min_m": f"{H_min:g}",
+                "L2_error": f"{row['L2_error']:.10e}",
+                "runtime_seconds": (
                     ""
                     if row["runtime_seconds"] is None
-                    else f"{row['runtime_seconds']:.9f}",
-                "runtime_text":
-                    row["runtime_text"],
+                    else f"{row['runtime_seconds']:.9f}"
+                ),
+                "runtime_text": row["runtime_text"],
             })
 
-    print(
-        f"\nSaved table to:\n"
-        f"  {csv_filename}"
-    )
+    print(f"\nSaved table to:\n  {csv_filename}")
+
+    print("\nSUMMARY OF SUCCESSFULLY LOADED L2 RESULTS")
+    print("-" * 72)
+    for T in times:
+        for family in run_families:
+            rows_here = [
+                row for row in all_rows
+                if (
+                    np.isclose(row["T"], T)
+                    and row["family_key"] == family["key"]
+                )
+            ]
+
+            if not rows_here:
+                print(
+                    f"T={T:g}, {family['key']}: "
+                    "NO SUCCESSFULLY LOADED RESULTS"
+                )
+                continue
+
+            rows_here = sorted(
+                rows_here,
+                key=lambda row: row["dt"],
+            )
+
+            print(
+                f"T={T:g}, {family['key']}: "
+                f"{len(rows_here)} points"
+            )
+
+            for row in rows_here:
+                print(
+                    f"    dt={row['dt']:g}, "
+                    f"L2_error={row['L2_error']:.8e}"
+                )
 
     # -------------------------------------------------------------
-    # Figure 1:
-    # L2 error vs timestep, one panel per resolution
+    # Figure 1: L2 error vs timestep.
+    # One panel per output time T; one curve per run family.
     # -------------------------------------------------------------
 
+    n_times = len(times)
     fig, axes = plt.subplots(
         1,
-        2,
-        figsize=(12.5, 5.2),
+        n_times,
+        figsize=(6.0 * n_times, 5.2),
         sharey=True,
         constrained_layout=True,
+        squeeze=False,
     )
+    axes = axes[0]
 
-    panel_labels = ["(a)", "(b)"]
+    panel_labels = [
+        f"({chr(ord('a') + i)})"
+        for i in range(n_times)
+    ]
 
-    for panel, resolution in enumerate(
-        resolutions
-    ):
-
+    for panel, T in enumerate(times):
         ax = axes[panel]
+        any_time_data = False
 
-        resolution_rows = [
-            row
-            for row in all_rows
-            if row["resolution"] == resolution
-        ]
+        for family in run_families:
+            family_rows = [
+                row for row in all_rows
+                if (
+                    row["family_key"] == family["key"]
+                    and np.isclose(row["T"], T)
+                )
+            ]
 
-        if not resolution_rows:
+            if not family_rows:
+                continue
 
+            plot_dts = np.asarray(
+                [row["dt"] for row in family_rows],
+                dtype=float,
+            )
+            plot_errors = np.asarray(
+                [row["L2_error"] for row in family_rows],
+                dtype=float,
+            )
+
+            print(
+                f"PLOT DATA: T={T:g}, "
+                f"family={family['key']}"
+            )
+            print("  dt     =", plot_dts)
+            print("  errors =", plot_errors)
+
+            valid = (
+                np.isfinite(plot_dts)
+                & np.isfinite(plot_errors)
+                & (plot_dts > 0.0)
+                & (plot_errors > 0.0)
+            )
+
+            if not np.all(valid):
+                print(
+                    f"Warning: removing invalid log-plot values for "
+                    f"T={T:g}, {family['key']}:"
+                )
+
+                for dt_value, error_value, is_valid in zip(
+                    plot_dts,
+                    plot_errors,
+                    valid,
+                ):
+                    if not is_valid:
+                        print(
+                            f"    dt={dt_value:g}, "
+                            f"L2_error={error_value}"
+                        )
+
+            plot_dts = plot_dts[valid]
+            plot_errors = plot_errors[valid]
+
+            if plot_dts.size == 0:
+                print(
+                    f"WARNING: no plottable points for "
+                    f"T={T:g}, {family['key']}"
+                )
+                continue
+
+            any_time_data = True
+            order = np.argsort(plot_dts)
+
+            ax.loglog(
+                plot_dts[order],
+                plot_errors[order],
+                marker="o",
+                linewidth=2.0,
+                markersize=7,
+                label=family["label"],
+            )
+
+        if not any_time_data:
             ax.set_visible(False)
             continue
 
-        plot_dts = np.asarray(
-            [
-                row["dt"]
-                for row in resolution_rows
-            ],
-            dtype=float,
-        )
-
-        plot_errors = np.asarray(
-            [
-                row["L2_error"]
-                for row in resolution_rows
-            ],
-            dtype=float,
-        )
-
-        order = np.argsort(
-            plot_dts
-        )
-
-        ax.loglog(
-            plot_dts[order],
-            plot_errors[order],
-            marker="o",
-            linewidth=2.0,
-            markersize=7,
-        )
-
-        ax.set_xlabel(
-            r"$\Delta t$ [a]",
-            fontsize=16,
-        )
-
-        ax.set_title(
-            rf"$\Delta x={resolution:g}$ m",
-            fontsize=16,
-        )
-
-        ax.tick_params(
-            axis="both",
-            labelsize=13,
-        )
-
-        ax.grid(
-            True,
-            which="both",
-            alpha=0.3,
-        )
+        ax.set_xlabel(r"$\Delta t$ [a]", fontsize=16)
+        ax.set_title(rf"$T={T:g}$ a", fontsize=15)
+        ax.tick_params(axis="both", labelsize=13)
+        ax.grid(True, which="both", alpha=0.3)
+        ax.legend(fontsize=12)
 
         ax.text(
             0.04,
@@ -648,139 +638,114 @@ def main():
             panel_labels[panel],
             transform=ax.transAxes,
             fontsize=16,
-            fontweight="bold",
             va="top",
             ha="left",
         )
 
-    axes[0].set_ylabel(
-        r"$L_2$ error in $H$ [m$^2$]",
-        fontsize=16,
-    )
+    # Put the shared y-label on the first visible panel.
+    for ax in axes:
+        if ax.get_visible():
+            ax.set_ylabel(
+                r"$L_2$ error in ice thickness",
+                fontsize=16,
+            )
+            break
 
     fig.savefig(
         dt_figure_filename,
         dpi=figure_dpi,
         bbox_inches="tight",
     )
-
     print(
-        f"Saved timestep-error figure to:\n"
+        "Saved timestep-error figure to:\n"
         f"  {dt_figure_filename}"
     )
 
     # -------------------------------------------------------------
-    # Figure 2:
-    # L2 error vs runtime, one panel per resolution
+    # Figure 2: L2 error vs runtime.
+    # One panel per output time T; one curve per run family.
     # -------------------------------------------------------------
 
     fig_runtime, runtime_axes = plt.subplots(
         1,
-        2,
-        figsize=(12.5, 5.2),
+        n_times,
+        figsize=(6.0 * n_times, 5.2),
         sharey=True,
         constrained_layout=True,
+        squeeze=False,
     )
+    runtime_axes = runtime_axes[0]
 
     any_runtime_data = False
 
-    for panel, resolution in enumerate(
-        resolutions
-    ):
-
+    for panel, T in enumerate(times):
         ax = runtime_axes[panel]
+        any_time_runtime = False
 
-        resolution_rows = [
-            row
-            for row in all_rows
-            if (
-                row["resolution"] == resolution
-                and row["runtime_seconds"] is not None
-                and row["runtime_seconds"] > 0.0
-                and row["L2_error"] > 0.0
+        for family in run_families:
+            family_rows = [
+                row for row in all_rows
+                if (
+                    row["family_key"] == family["key"]
+                    and np.isclose(row["T"], T)
+                    and row["runtime_seconds"] is not None
+                    and row["runtime_seconds"] > 0.0
+                    and row["L2_error"] > 0.0
+                )
+            ]
+
+            if not family_rows:
+                continue
+
+            any_runtime_data = True
+            any_time_runtime = True
+
+            runtimes = np.asarray(
+                [row["runtime_seconds"] for row in family_rows],
+                dtype=float,
             )
-        ]
+            runtime_errors = np.asarray(
+                [row["L2_error"] for row in family_rows],
+                dtype=float,
+            )
+            runtime_dts = np.asarray(
+                [row["dt"] for row in family_rows],
+                dtype=float,
+            )
 
-        if not resolution_rows:
+            order = np.argsort(runtimes)
 
+            ax.loglog(
+                runtimes[order],
+                runtime_errors[order],
+                marker="o",
+                linewidth=2.0,
+                markersize=7,
+                label=family["label"],
+            )
+
+            for runtime_value, error_value, dt_value in zip(
+                runtimes,
+                runtime_errors,
+                runtime_dts,
+            ):
+                ax.annotate(
+                    rf"$\Delta t={dt_value:g}$",
+                    (runtime_value, error_value),
+                    xytext=(6, 5),
+                    textcoords="offset points",
+                    fontsize=10,
+                )
+
+        if not any_time_runtime:
             ax.set_visible(False)
             continue
 
-        any_runtime_data = True
-
-        runtimes = np.asarray(
-            [
-                row["runtime_seconds"]
-                for row in resolution_rows
-            ],
-            dtype=float,
-        )
-
-        runtime_errors = np.asarray(
-            [
-                row["L2_error"]
-                for row in resolution_rows
-            ],
-            dtype=float,
-        )
-
-        runtime_dts = np.asarray(
-            [
-                row["dt"]
-                for row in resolution_rows
-            ],
-            dtype=float,
-        )
-
-        order = np.argsort(
-            runtimes
-        )
-
-        ax.loglog(
-            runtimes[order],
-            runtime_errors[order],
-            marker="o",
-            linewidth=2.0,
-            markersize=7,
-        )
-
-        for runtime_value, error_value, dt_value in zip(
-            runtimes,
-            runtime_errors,
-            runtime_dts,
-        ):
-
-            ax.annotate(
-                rf"$\Delta t={dt_value:g}$",
-                (
-                    runtime_value,
-                    error_value,
-                ),
-                xytext=(6, 5),
-                textcoords="offset points",
-                fontsize=11,
-            )
-
-        ax.set_xlabel(
-            "Wall-clock runtime [s]",
-            fontsize=16,
-        )
-
-        ax.set_title(
-            rf"$\Delta x={resolution:g}$ m",
-            fontsize=16,
-        )
-
-        ax.tick_params(
-            axis="both",
-            labelsize=13,
-        )
-
-        ax.grid(
-            True,
-            which="both",
-            alpha=0.3,
-        )
+        ax.set_xlabel("Wall-clock runtime [s]", fontsize=16)
+        ax.set_title(rf"$T={T:g}$ a", fontsize=15)
+        ax.tick_params(axis="both", labelsize=13)
+        ax.grid(True, which="both", alpha=0.3)
+        ax.legend(fontsize=12)
 
         ax.text(
             0.04,
@@ -794,29 +759,30 @@ def main():
         )
 
     if any_runtime_data:
-
-        runtime_axes[0].set_ylabel(
-            r"$L_2$ error in $H$ [m$^2$]",
-            fontsize=16,
-        )
+        # Put the shared y-label on the first visible runtime panel.
+        for ax in runtime_axes:
+            if ax.get_visible():
+                ax.set_ylabel(
+                    r"$L_2$ error in ice thickness]",
+                    fontsize=16,
+                )
+                break
 
         fig_runtime.savefig(
             runtime_figure_filename,
             dpi=figure_dpi,
             bbox_inches="tight",
         )
-
         print(
-            f"Saved L2-error/runtime figure to:\n"
+            "Saved L2-error/runtime figure to:\n"
             f"  {runtime_figure_filename}"
         )
-
     else:
-
+        plt.close(fig_runtime)
         print(
-            "Warning: no matching runtime records with "
-            "resolution information were found, so the "
-            "runtime figure was not made."
+            "Warning: no runtime records could be matched to the screenshot "
+            "run families and requested output times, so the runtime figure "
+            "was not made."
         )
 
     plt.show()

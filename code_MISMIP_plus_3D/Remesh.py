@@ -19,12 +19,12 @@ INPUT_RESTART = Path(
     "restart_t10000.h5"
 )
 
-OUTPUT_RESTART = Path(f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}/restart_t10000.h5")
+OUTPUT_RESTART = Path(f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_test/restart_t10000.h5")
 
 # Existing *horizontal* unstructured Gmsh mesh.
 # This mesh is loaded directly; this script does not reconstruct or modify the
 # horizontal triangulation.
-TARGET_BASE_MESH = Path(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}.msh")
+TARGET_BASE_MESH = Path(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_test.msh")
 
 # Number of vertical layers used when extruding the supplied horizontal mesh.
 NZ = 10

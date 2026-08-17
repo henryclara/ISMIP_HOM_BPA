@@ -17,8 +17,8 @@ Ly = float(Ly)
 h_coarse = float(coarse_res)
 h_fine = float(refined_res)
 
-x_ref_min = 400000.0
-x_ref_max = 500000.0
+x_ref_min = 350000.0
+x_ref_max = 450000.0
 
 # --------------------------------------------------
 # Geometry
@@ -165,7 +165,7 @@ gmsh.option.setNumber(
 # --------------------------------------------------
 gmsh.model.mesh.generate(2)
 
-gmsh.write("Meshes/mesh_res_" + str(int(h_coarse)) + "_" + str(int(h_fine)) + ".msh")
+gmsh.write("Meshes/mesh_res_" + str(int(h_coarse)) + "_" + str(int(h_fine)) + "_test.msh")
 
 # Run the FLTK GUI only if explicitly requested via environment variable.
 if os.environ.get("GMESH_GUI", "0") == "1":

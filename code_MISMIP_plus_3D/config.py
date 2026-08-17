@@ -6,17 +6,17 @@ Ly_full = 80000.0
 Ly = Ly_full / 2.0
 nz = int(10)
 
-dts = [1]
+dts = [20, 10, 5, 2, 1, 0.1]
 theta_outs = [1]
 FSSA_keyword = "full"
 zeta_pred = False
-time_stepping = "im"
-T = 8500
+time_stepping = "im_mi"
+T = 10200
 output_int = 100
-coarse_res = 4000.0
-refined_res = 4000.0
-exp_name = "Ice0" # "Ice1rr", "Ice1ra"
-restart_from = f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}/restart_t8000.h5"
+coarse_res = 2000.0
+refined_res = 1000.0
+exp_name = "Ice1rr"  # "Ice0", "Ice1rr", "Ice1ra"
+restart_from = f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_test/restart_t10000.h5"
 
 yearinsec = 365.25 * 24 * 60 * 60
 A = Constant(20.0)

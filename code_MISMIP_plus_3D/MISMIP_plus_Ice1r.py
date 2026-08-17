@@ -79,7 +79,7 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}")
+        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_time")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         theta = Constant(theta_out)
@@ -201,6 +201,14 @@ for dt in dts:
             )
 
             solver.solve()
+
+            nonlinear_iterations = solver.snes.getIterationNumber()
+            print(
+                f"Time step {step_number}: "
+                f"t={t_restart + step_number * dt:g}, "
+                f"Newton iterations={nonlinear_iterations}"
+            )
+
             if theta_out == 0:
                 uvec_out.assign(uvec)
                 w.sub(0).assign(uvec_out)
@@ -349,4 +357,3 @@ for dt in dts:
                 restart_file = run_dir / f"restart_t{t:g}.h5"
 
                 save_restart(str(restart_file),t,step_number,dt,theta_out)
-

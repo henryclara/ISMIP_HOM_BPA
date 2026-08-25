@@ -17,16 +17,18 @@ if restart_mesh_file:
         except Exception:
             mesh3D = afile.load_mesh(reorder=False)
 
-    # Ensure loaded checkpoint mesh uses the same horizontal origin as the
-    # original RectangleMesh-based setup. Some restart meshes have y in
-    # [0, Ly] while the code expects y in [Ly_full/2, Ly_full/2 + Ly]. If the
-    # minimum y is near zero, shift upward by Ly_full/2.
+    base = mesh3D._base_mesh
     coords = mesh3D.coordinates.dat.data_ro.copy()
     ymin = float(coords[:, 1].min())
     if ymin < 1.0e-6:
         shift = float(Ly_full / 2.0)
         coords[:, 1] += shift
         mesh3D.coordinates.dat.data[:] = coords
+
+        base_coords = base.coordinates.dat.data_ro.copy()
+        base_coords[:, 1] += shift
+        base.coordinates.dat.data[:] = base_coords
+        
 else:
     # New simulation: load 2D Gmsh mesh and extrude
     base = Mesh(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}.msh")

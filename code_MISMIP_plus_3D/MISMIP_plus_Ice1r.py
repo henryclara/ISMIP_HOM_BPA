@@ -48,6 +48,12 @@ for dt in dts:
         u_prev.assign(uvec_out)
         H.assign(thick)
 
+        thick_2D.dat.data[:] = thick.dat.data_ro[:]
+        zb_2D.dat.data[:] = zb.dat.data_ro[:]
+        bed_2D.dat.data[:] = bed.dat.data_ro[:]
+
+        H_2D.assign(thick_2D)
+
         zeta_out = Function(Q1, name="zeta_out")
         phi_GL_out = Function(Q1, name="flotation_function")
 
@@ -74,7 +80,7 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_testGJP_0.1")
+        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_testGJP_2D_thickness")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         theta = Constant(theta_out)
@@ -223,25 +229,11 @@ for dt in dts:
 
             ubar = Function(VVbar, name="u_bar")
             ubar.project(uvec_out)
-            ux_bar, uy_bar = split(ubar)
 
-            vel = as_vector([ux_bar, uy_bar])
-            vnorm = sqrt(dot(vel, vel) + 1e-10)
-
-            J = ufl.Jacobian(mesh3D)
-
-            xmax = max_value(0.0, max_value(J[0, 0], J[0, 1]))
-            xmin = min_value(0.0, min_value(J[0, 0], J[0, 1]))
-            ymax = max_value(0.0,max_value(J[1, 0], J[1, 1]))
-            ymin = min_value(0.0,min_value(J[1, 0], J[1, 1]))
-            h_x = xmax - xmin
-            h_y = ymax - ymin
-
-            C_art = Constant(0.1)
-            eps_u = Constant(1.0e-10)
-
-            mu_x = (C_art * h_x * sqrt(ux_bar**2 + eps_u**2))
-            mu_y = (C_art * h_y * sqrt(uy_bar**2 + eps_u**2))
+            ubar_2D.dat.data[:] = ubar.dat.data_ro[:]
+            thick_2D.dat.data[:] = thick.dat.data_ro[:]
+            zb_2D.dat.data[:] = zb.dat.data_ro[:]
+            bed_2D.dat.data[:] = bed.dat.data_ro[:]
 
             z_ref = Function(Q1, name="z_ref")
             z_ref.interpolate(SpatialCoordinate(mesh3D)[2])
@@ -249,61 +241,53 @@ for dt in dts:
             sigma_ref = Function(Q1, name="sigma_ref")
             sigma_ref.interpolate((z_ref - zb) / thick)
 
-            n = FacetNormal(mesh3D)
-            u_adv = as_vector((ux_bar, uy_bar, 0.0))
+            cavity_thickness_2D = max_value(zb_2D - bed_2D, Constant(0.0))
 
-            u_n = 0.5 * (abs(dot(u_adv("+"), n("+"))) + abs(dot(u_adv("-"), n("-"))))
-            h_plus = (abs(n("+")[0]) * h_x("+") + abs(n("+")[1]) * h_y("+"))
-            h_minus = (abs(n("-")[0]) * h_x("-") + abs(n("-")[1]) * h_y("-"))
+            if exp_name == "Ice1rr" or (exp_name == "Ice1ra" and t < 10100):
 
-            h_face = 0.5 * (h_plus + h_minus)
+                a_b_Ice1r_2D = (Constant(0.2) * tanh(cavity_thickness_2D / Constant(75.0))
+                    * max_value(-Constant(100.0) - zb_2D, Constant(0.0)))
+
+            else:
+                a_b_Ice1r_2D = Constant(0.0)
 
             if time_stepping == "im":
-
-                grad_H = as_vector((thick_new.dx(0),thick_new.dx(1),0.0))
-                grad_phi = as_vector((phi.dx(0),phi.dx(1),0.0))
-
-                gjp = (tau_gjp * h_face**2 * u_n * jump(grad_H, n) * jump(grad_phi, n) * dS_v)
-
-                F = (
-                    thick_new * phi * dx
-                    - thick * phi * dx
-                    + dt * (ux_bar * thick_new).dx(0) * phi * dx
-                    + dt * (uy_bar * thick_new).dx(1) * phi * dx
-                    - dt * (a_s - a_b_Ice1r) * phi * dx
-
-                    # Gradient-jump penalty
-                    + dt * gjp
-                )
+                H_adv = thick_new_2D
 
             elif time_stepping == "im_mi":
+                H_adv = 0.5 * (thick_new_2D + thick_2D)
 
-                H_mid = 0.5 * (thick_new + thick)
-                grad_H_mid = as_vector((H_mid.dx(0),H_mid.dx(1),0.0))
-                grad_phi = as_vector((phi.dx(0),phi.dx(1),0.0))
-                gjp = (tau_gjp * h_face**2 * u_n * jump(grad_H_mid, n) * jump(grad_phi, n) * dS_v)
+            else:
+                raise ValueError(f"Unknown time stepping option: {time_stepping}")
 
-                F = (thick_new * phi * dx
-                    - thick * phi * dx
-                    + dt * (ux_bar * H_mid).dx(0) * phi * dx
-                    + dt * (uy_bar * H_mid).dx(1) * phi * dx
-                    - dt * (a_s - a_b_Ice1r) * phi * dx
-                    # Gradient-jump penalty
-                    + dt * gjp
-                )
+            n_H = FacetNormal(base)
+            h_H = CellDiameter(base)
+            h_face = avg(h_H)
 
-            old_thick = Function(Vbar)
-            old_thick.assign(thick)
+            u_n = 0.5 * (abs(dot(ubar_2D("+"), n_H("+"))) + abs(dot(ubar_2D("-"), n_H("-"))))
+            gjp = (tau_gjp * h_face**2 * u_n * jump(grad(H_adv), n_H) * jump(grad(phi_2D), n_H) * dS(domain=base))
+            dx_H = dx(domain=base)
+            ux_bar_2D, uy_bar_2D = split(ubar_2D)
 
-            solve(lhs(F) == rhs(F), H)
-            thick.assign(H)
-            thick.dat.data[:] = np.maximum(thick.dat.data, 10.0)
+            F_H = (thick_new_2D * phi_2D * dx_H
+                - thick_2D * phi_2D * dx_H
+                + dt * (ux_bar_2D * H_adv).dx(0) * phi_2D * dx_H
+                + dt * (uy_bar_2D * H_adv).dx(1) * phi_2D * dx_H
+                - dt * (a_s - a_b_Ice1r_2D) * phi_2D * dx_H
+                 + dt * gjp
+            )
 
+            solve(lhs(F_H) == rhs(F_H),H_2D)
+
+            thick_2D.assign(H_2D)
+            thick_2D.dat.data[:] = np.maximum(thick_2D.dat.data, 10.0)
+            thick.dat.data[:] = thick_2D.dat.data_ro[:]
             zb_float = -rhoi / rhow * thick
+
             zb.interpolate(max_value(bed, zb_float))
             zs.interpolate(zb + thick)
-
             mesh3D.coordinates.interpolate(as_vector([xref, yref, zb + sigma_ref * thick]))
+
             print("Finished solving thickness evolution...")
 
             t = t_restart + step_number * dt

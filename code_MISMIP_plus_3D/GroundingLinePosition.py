@@ -14,7 +14,7 @@ from matplotlib.lines import Line2D
 # Configuration
 # ---------------------------------------------------------------------
 
-T = 10100
+times = [10100, 10200]
 theta = 1
 
 dts = [0.1, 1, 2, 5, 10, 20]
@@ -52,20 +52,24 @@ run_families = [
     },
 ]
 
-output_filename = os.path.join(
-    simulation_directory,
-    f"Ice1r_grounding_lines_base_mesh_T{T:g}.png",
-)
-
-csv_directory = os.path.join(
-    simulation_directory,
-    f"grounding_line_base_mesh_T{T:g}",
-)
-
 
 # ---------------------------------------------------------------------
 # Restart-file discovery
 # ---------------------------------------------------------------------
+
+def output_filename_for_time(T):
+    return os.path.join(
+        simulation_directory,
+        f"Ice1r_grounding_lines_base_mesh_T{T:g}.png",
+    )
+
+
+def csv_directory_for_time(T):
+    return os.path.join(
+        simulation_directory,
+        f"grounding_line_base_mesh_T{T:g}",
+    )
+
 
 def run_directory_candidates(dt, family):
 
@@ -77,7 +81,7 @@ def run_directory_candidates(dt, family):
     ]
 
 
-def find_restart_file(dt, family):
+def find_restart_file(T, dt, family):
 
     tried = []
 
@@ -148,15 +152,16 @@ def load_mesh_from_checkpoint(afile, filename):
         )
 
 
-def load_state(dt, family):
+def load_state(T, dt, family):
 
     filename = find_restart_file(
+        T,
         dt,
         family,
     )
 
     print(
-        f"\nLoading {family['key']}, dt={dt:g}:\n"
+        f"\nLoading T={T:g}, {family['key']}, dt={dt:g}:\n"
         f"  {filename}"
     )
 
@@ -956,138 +961,13 @@ def select_grounding_line(polylines):
 
 
 # ---------------------------------------------------------------------
-# Main
+# Plotting helper
 # ---------------------------------------------------------------------
 
-def main():
+def make_grounding_line_figure(T, grounding_lines):
 
-    os.makedirs(
-        simulation_directory,
-        exist_ok=True,
-    )
-
-    os.makedirs(
-        csv_directory,
-        exist_ok=True,
-    )
-
-    grounding_lines = {
-        family["key"]: {}
-        for family in run_families
-    }
-
-    for family in run_families:
-
-        print(
-            "\n"
-            + "=" * 78
-        )
-
-        print(
-            f"Processing {family['key']}"
-        )
-
-        print(
-            "=" * 78
-        )
-
-        for dt in dts:
-
-            try:
-
-                mesh, H, zb = load_state(
-                    dt,
-                    family,
-                )
-
-                (
-                    base_mesh,
-                    zeta_base,
-                    zb_base,
-                    zs_base,
-                ) = make_base_fields(
-                    mesh,
-                    H,
-                    zb,
-                )
-
-                segments = contour_segments_on_base_mesh(
-                    base_mesh,
-                    zeta_base,
-                    zb_base,
-                    zs_base,
-                )
-
-                polylines = connected_polylines(
-                    segments
-                )
-
-                grounding_line = select_grounding_line(
-                    polylines
-                )
-
-            except (
-                FileNotFoundError,
-                RuntimeError,
-                ValueError,
-            ) as exc:
-
-                print(
-                    f"Warning: {exc}"
-                )
-
-                continue
-
-            if grounding_line.size == 0:
-
-                print(
-                    f"Warning: no grounding line found for "
-                    f"{family['key']}, dt={dt:g}"
-                )
-
-                continue
-
-            # If needed, reverse the whole ordered curve.  Never sort the
-            # individual x/y points independently or by y.
-            if (
-                grounding_line.shape[0] > 1
-                and grounding_line[0, 1]
-                > grounding_line[-1, 1]
-            ):
-
-                grounding_line = grounding_line[
-                    ::-1
-                ]
-
-            grounding_lines[
-                family["key"]
-            ][dt] = grounding_line
-
-            csv_filename = os.path.join(
-                csv_directory,
-                (
-                    f"{family['key']}"
-                    f"_dt{dt:g}"
-                    f"_T{T:g}.csv"
-                ),
-            )
-
-            np.savetxt(
-                csv_filename,
-                grounding_line,
-                delimiter=",",
-                header="x_GL_km,y_km",
-                comments="",
-            )
-
-            print(
-                f"  SELECTED grounding line: "
-                f"{grounding_line.shape[0]} ordered points, "
-                f"x={np.min(grounding_line[:,0]):.3f}--"
-                f"{np.max(grounding_line[:,0]):.3f} km, "
-                f"y={np.min(grounding_line[:,1]):.3f}--"
-                f"{np.max(grounding_line[:,1]):.3f} km"
-            )
+    output_filename = output_filename_for_time(T)
+    csv_directory = csv_directory_for_time(T)
 
     if not any(
         grounding_lines[
@@ -1097,12 +977,8 @@ def main():
     ):
 
         raise RuntimeError(
-            "No grounding lines were extracted."
+            f"No grounding lines were extracted for T={T:g}."
         )
-
-    # -------------------------------------------------------------
-    # Plot limits
-    # -------------------------------------------------------------
 
     all_lines = [
         line
@@ -1160,10 +1036,6 @@ def main():
         y_max + 0.03 * y_span,
     )
 
-    # -------------------------------------------------------------
-    # Styling
-    # -------------------------------------------------------------
-
     cmap = plt.get_cmap(
         "viridis"
     )
@@ -1202,10 +1074,6 @@ def main():
             "linestyle": "-",
             "zorder": 8,
         }
-
-    # -------------------------------------------------------------
-    # Figure
-    # -------------------------------------------------------------
 
     fig, axes = plt.subplots(
         2,
@@ -1298,7 +1166,6 @@ def main():
             ],
             transform=ax.transAxes,
             fontsize=18,
-            fontweight="bold",
             va="top",
             ha="left",
         )
@@ -1322,10 +1189,6 @@ def main():
         r"Grounding-line position $x_{\mathrm{GL}}$ [km]",
         fontsize=17,
     )
-
-    # -------------------------------------------------------------
-    # Shared legend
-    # -------------------------------------------------------------
 
     legend_ax.axis(
         "off"
@@ -1371,7 +1234,7 @@ def main():
     legend_ax.text(
         0.5,
         0.88,
-        rf"$T={T:g}$ a",
+        rf"$t={T:g}$ a",
         transform=legend_ax.transAxes,
         fontsize=18,
         ha="center",
@@ -1393,6 +1256,163 @@ def main():
         f"\nSaved ordered grounding-line coordinates to:\n"
         f"  {csv_directory}"
     )
+
+    return fig
+
+
+# ---------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------
+
+def main():
+
+    os.makedirs(
+        simulation_directory,
+        exist_ok=True,
+    )
+
+    figures = []
+
+    for T in times:
+
+        csv_directory = csv_directory_for_time(T)
+
+        os.makedirs(
+            csv_directory,
+            exist_ok=True,
+        )
+
+        grounding_lines = {
+            family["key"]: {}
+            for family in run_families
+        }
+
+        print(
+            "\n"
+            + "#" * 78
+        )
+        print(
+            f"Extracting grounding lines for T={T:g}"
+        )
+        print(
+            "#" * 78
+        )
+
+        for family in run_families:
+
+            print(
+                "\n"
+                + "=" * 78
+            )
+
+            print(
+                f"Processing {family['key']}"
+            )
+
+            print(
+                "=" * 78
+            )
+
+            for dt in dts:
+
+                try:
+
+                    mesh, H, zb = load_state(
+                        T,
+                        dt,
+                        family,
+                    )
+
+                    (
+                        base_mesh,
+                        zeta_base,
+                        zb_base,
+                        zs_base,
+                    ) = make_base_fields(
+                        mesh,
+                        H,
+                        zb,
+                    )
+
+                    segments = contour_segments_on_base_mesh(
+                        base_mesh,
+                        zeta_base,
+                        zb_base,
+                        zs_base,
+                    )
+
+                    polylines = connected_polylines(
+                        segments
+                    )
+
+                    grounding_line = select_grounding_line(
+                        polylines
+                    )
+
+                except (
+                    FileNotFoundError,
+                    RuntimeError,
+                    ValueError,
+                ) as exc:
+
+                    print(
+                        f"Warning: {exc}"
+                    )
+
+                    continue
+
+                if grounding_line.size == 0:
+
+                    print(
+                        f"Warning: no grounding line found for "
+                        f"T={T:g}, {family['key']}, dt={dt:g}"
+                    )
+
+                    continue
+
+                if (
+                    grounding_line.shape[0] > 1
+                    and grounding_line[0, 1]
+                    > grounding_line[-1, 1]
+                ):
+
+                    grounding_line = grounding_line[
+                        ::-1
+                    ]
+
+                grounding_lines[
+                    family["key"]
+                ][dt] = grounding_line
+
+                csv_filename = os.path.join(
+                    csv_directory,
+                    (
+                        f"{family['key']}"
+                        f"_dt{dt:g}"
+                        f"_T{T:g}.csv"
+                    ),
+                )
+
+                np.savetxt(
+                    csv_filename,
+                    grounding_line,
+                    delimiter=",",
+                    header="x_GL_km,y_km",
+                    comments="",
+                )
+
+                print(
+                    f"  SELECTED grounding line: "
+                    f"{grounding_line.shape[0]} ordered points, "
+                    f"x={np.min(grounding_line[:,0]):.3f}--"
+                    f"{np.max(grounding_line[:,0]):.3f} km, "
+                    f"y={np.min(grounding_line[:,1]):.3f}--"
+                    f"{np.max(grounding_line[:,1]):.3f} km"
+                )
+
+        figures.append(
+            make_grounding_line_figure(T, grounding_lines)
+        )
 
     plt.show()
 

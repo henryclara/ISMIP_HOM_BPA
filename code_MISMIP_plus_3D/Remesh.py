@@ -15,16 +15,16 @@ from geometry import mismip_bed
 # -----------------------------------------------------------------------------
 
 INPUT_RESTART = Path(
-    "Simulations/Ice0_theta1_dt1_res2000_1000_nz10/"
-    "restart_t10000.h5"
+    "Simulations/Ice1ra_theta1_dt0.5_res2000_2000_nz10_time/"
+    "restart_t8000.h5"
 )
 
-OUTPUT_RESTART = Path(f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_test/restart_t10000.h5")
+OUTPUT_RESTART = Path(f"Simulations/remesh_mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_unstructured/restart_t8000.h5")
 
 # Existing *horizontal* unstructured Gmsh mesh.
 # This mesh is loaded directly; this script does not reconstruct or modify the
 # horizontal triangulation.
-TARGET_BASE_MESH = Path(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_test.msh")
+TARGET_BASE_MESH = Path(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_unstructured.msh")
 
 # Number of vertical layers used when extruding the supplied horizontal mesh.
 NZ = 10

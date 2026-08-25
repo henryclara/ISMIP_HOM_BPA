@@ -93,7 +93,7 @@ def load_state(dt, theta):
 
     filename = (
         f"{output_directory}/"
-        f"remesh_refined_MISMIP_output_theta1_dt0.5_GL_predFalse_res_250_nz_10/"
+        f"Ice0_theta1_dt1_res2000_1000_nz10/"
         f"restart_t{T:g}.h5"
     )
 
@@ -313,150 +313,675 @@ def thickness_surface(H):
 
 
 # ---------------------------------------------------------------------
-# Extract the grounding-line curve from hydrostatic equilibrium
+# Extract grounding line using the TRUE Firedrake base-mesh connectivity
 # ---------------------------------------------------------------------
 
-def grounding_line_curve(H, zb):
+def get_base_mesh(mesh):
+
+    base_mesh = getattr(
+        mesh,
+        "_base_mesh",
+        None,
+    )
+
+    if base_mesh is None:
+
+        topology = getattr(
+            mesh,
+            "topology",
+            None,
+        )
+
+        if topology is not None:
+
+            base_mesh = getattr(
+                topology,
+                "_base_mesh",
+                None,
+            )
+
+    if base_mesh is None:
+
+        raise RuntimeError(
+            "Could not obtain the horizontal base mesh from the "
+            "extruded checkpoint mesh."
+        )
+
+    return base_mesh
+
+
+def make_base_grounding_fields(mesh, H, zb):
     """
-    Extract an explicit grounding-line curve x_GL(y).
+    Build grounded/floating information on the actual horizontal base mesh.
 
-    The hydrostatic flotation difference is
-
-        D = zb + (rho_i / rho_w) * H.
-
-    Floating ice has D approximately zero, while grounded ice has
-    D greater than zero. For each horizontal y-row, this function finds
-    the transition from grounded to floating ice as x increases and
-    linearly interpolates its x-coordinate.
-
-    Returns
-    -------
-    x_gl : ndarray
-        Grounding-line x coordinates in km.
-    y_gl : ndarray
-        Grounding-line y coordinates in km.
-    difference_values : ndarray
-        Hydrostatic flotation difference at all horizontal nodes in m.
+    This avoids creating a new Delaunay triangulation from an unordered
+    x-y point cloud.
     """
 
-    V = H.function_space()
+    base_mesh = get_base_mesh(mesh)
 
-    flotation_difference = Function(
+    # Horizontally CG1, vertically constant.
+    U = FunctionSpace(
+        mesh,
+        "CG",
+        1,
+        vfamily="R",
+        vdegree=0,
+    )
+
+    D_column = Function(
+        U,
+        name="D_column",
+    )
+
+    zeta_column = Function(
+        U,
+        name="zeta_column",
+    )
+
+    D_column.interpolate(
+        zb
+        + Constant(rhoi / rhow) * H
+    )
+
+    zeta_column.interpolate(
+        conditional(
+            D_column > grounding_line_tolerance,
+            0.0,
+            1.0,
+        )
+    )
+
+    Vbase = FunctionSpace(
+        base_mesh,
+        "CG",
+        1,
+    )
+
+    zeta_base = Function(
+        Vbase,
+        name="zeta_base",
+    )
+
+    if (
+        zeta_column.dat.data_ro.size
+        != zeta_base.dat.data_ro.size
+    ):
+
+        raise RuntimeError(
+            "Cannot safely transfer the vertically constant grounding "
+            "mask to the base mesh: the DoF counts differ."
+        )
+
+    zeta_base.dat.data[:] = (
+        zeta_column.dat.data_ro[:]
+    )
+
+    return (
+        base_mesh,
+        zeta_base,
+    )
+
+
+def edge_crossing(
+    p0,
+    p1,
+    v0,
+    v1,
+    level=0.5,
+):
+
+    a0 = v0 - level
+    a1 = v1 - level
+
+    if a0 * a1 >= 0.0:
+        return None
+
+    fraction = (
+        level - v0
+    ) / (
+        v1 - v0
+    )
+
+    return (
+        p0
+        + fraction
+        * (
+            p1 - p0
+        )
+    )
+
+
+def grounding_line_segments_on_base_mesh(
+    base_mesh,
+    zeta_base,
+):
+    """
+    Find zeta=0.5 on each REAL triangular base-mesh cell.
+    """
+
+    V = zeta_base.function_space()
+
+    xcoord, ycoord = SpatialCoordinate(
+        base_mesh
+    )
+
+    x_field = Function(
         V,
-        name="hydrostatic_flotation_difference",
+        name="x_base",
     )
 
-    flotation_difference.interpolate(
-        zb + Constant(rhoi / rhow) * H
+    y_field = Function(
+        V,
+        name="y_base",
     )
 
-    x, y, difference_values = thickness_surface(
-        flotation_difference
+    x_field.interpolate(
+        xcoord
     )
 
-    # Group nodes into horizontal y-rows. Coordinates are already in km.
-    y_rounded = np.round(y, decimals=10)
-    unique_y = np.unique(y_rounded)
-
-    x_gl = []
-    y_gl = []
-
-    total_grounded = int(
-        np.count_nonzero(
-            difference_values > grounding_line_tolerance
-        )
-    )
-    total_floating = int(
-        difference_values.size - total_grounded
+    y_field.interpolate(
+        ycoord
     )
 
-    print(
-        "Grounding-line classification: "
-        f"{total_grounded} grounded nodes, "
-        f"{total_floating} floating nodes "
-        f"using tolerance {grounding_line_tolerance:g} m"
+    x = np.asarray(
+        x_field.dat.data_ro_with_halos,
+        dtype=float,
     )
 
-    for y_value in unique_y:
-        row = np.where(y_rounded == y_value)[0]
+    y = np.asarray(
+        y_field.dat.data_ro_with_halos,
+        dtype=float,
+    )
 
-        if row.size < 2:
-            continue
+    zeta = np.asarray(
+        zeta_base.dat.data_ro_with_halos,
+        dtype=float,
+    )
 
-        row_order = np.argsort(x[row])
-        row = row[row_order]
+    cell_nodes = np.asarray(
+        V.cell_node_map().values,
+        dtype=np.int64,
+    )
 
-        x_row = x[row]
-        difference_row = difference_values[row]
-        grounded_row = (
-            difference_row > grounding_line_tolerance
+    if cell_nodes.shape[1] != 3:
+
+        raise RuntimeError(
+            "Expected triangular CG1 base cells."
         )
 
-        # Find every change between grounded and floating. In MISMIP+
-        # the relevant transition is normally grounded -> floating as x
-        # increases. If several transitions occur, keep the downstream-most.
-        state_changes = np.where(
-            grounded_row[:-1] != grounded_row[1:]
-        )[0]
+    edges = [
+        (0, 1),
+        (1, 2),
+        (2, 0),
+    ]
 
-        if state_changes.size == 0:
-            continue
+    segments = []
 
-        grounded_to_floating = state_changes[
-            grounded_row[state_changes]
-            & ~grounded_row[state_changes + 1]
+    for nodes in cell_nodes:
+
+        points = np.column_stack(
+            (
+                x[nodes],
+                y[nodes],
+            )
+        )
+
+        values = zeta[
+            nodes
         ]
 
-        if grounded_to_floating.size > 0:
-            transition = grounded_to_floating[-1]
-        else:
-            transition = state_changes[-1]
+        crossings = []
 
-        x0 = x_row[transition]
-        x1 = x_row[transition + 1]
-        d0 = difference_row[transition]
-        d1 = difference_row[transition + 1]
+        for i, j in edges:
 
-        # Interpolate to D = grounding_line_tolerance. If the two values
-        # are effectively identical, use the midpoint.
-        if np.isclose(d0, d1):
-            x_crossing = 0.5 * (x0 + x1)
-        else:
-            fraction = (
-                (grounding_line_tolerance - d0)
-                / (d1 - d0)
+            point = edge_crossing(
+                points[i],
+                points[j],
+                values[i],
+                values[j],
+                level=0.5,
             )
-            fraction = np.clip(fraction, 0.0, 1.0)
-            x_crossing = x0 + fraction * (x1 - x0)
 
-        x_gl.append(x_crossing)
-        y_gl.append(float(y_value))
+            if point is not None:
 
-    x_gl = np.asarray(x_gl, dtype=float)
-    y_gl = np.asarray(y_gl, dtype=float)
+                crossings.append(
+                    point
+                )
 
-    if x_gl.size == 0:
-        print(
-            "Warning: no grounded-to-floating transition was found on "
-            "any y-row. Check the printed flotation-difference range and "
-            "try changing grounding_line_tolerance."
+        if len(crossings) != 2:
+            continue
+
+        segment = np.vstack(
+            (
+                crossings[0],
+                crossings[1],
+            )
+        ) / 1000.0
+
+        segments.append(
+            segment
         )
-        return x_gl, y_gl, difference_values
 
-    order = np.argsort(y_gl)
-    x_gl = x_gl[order]
-    y_gl = y_gl[order]
+    if not segments:
+        return []
 
-    print(
-        f"Grounding line extracted on {x_gl.size} y-rows; "
-        f"x range = {np.min(x_gl):.3f} to {np.max(x_gl):.3f} km"
+    # Remove duplicate copies from shared cell boundaries.
+    unique_segments = {}
+
+    for segment in segments:
+
+        a = tuple(
+            np.round(
+                segment[0],
+                8,
+            )
+        )
+
+        b = tuple(
+            np.round(
+                segment[1],
+                8,
+            )
+        )
+
+        key = tuple(
+            sorted(
+                (
+                    a,
+                    b,
+                )
+            )
+        )
+
+        unique_segments[key] = segment
+
+    return list(
+        unique_segments.values()
     )
 
-    return x_gl, y_gl, difference_values
+
+def point_key(point):
+
+    return tuple(
+        np.round(
+            point,
+            7,
+        )
+    )
 
 
-def add_grounding_line(ax, x_gl, y_gl):
-    """Draw an explicit grounding-line curve on an existing axis."""
+def connected_polylines(segments):
+    """
+    Join contour segments only when they actually share the same endpoint.
+    """
+
+    if not segments:
+        return []
+
+    adjacency = {}
+    coordinates = {}
+    edges = set()
+
+    for segment in segments:
+
+        a = point_key(
+            segment[0]
+        )
+
+        b = point_key(
+            segment[1]
+        )
+
+        if a == b:
+            continue
+
+        coordinates[a] = np.asarray(
+            segment[0],
+            dtype=float,
+        )
+
+        coordinates[b] = np.asarray(
+            segment[1],
+            dtype=float,
+        )
+
+        adjacency.setdefault(
+            a,
+            set(),
+        ).add(
+            b
+        )
+
+        adjacency.setdefault(
+            b,
+            set(),
+        ).add(
+            a
+        )
+
+        edges.add(
+            tuple(
+                sorted(
+                    (
+                        a,
+                        b,
+                    )
+                )
+            )
+        )
+
+    unvisited = set(
+        adjacency.keys()
+    )
+
+    components = []
+
+    while unvisited:
+
+        seed = next(
+            iter(
+                unvisited
+            )
+        )
+
+        stack = [seed]
+        component = set()
+
+        while stack:
+
+            node = stack.pop()
+
+            if node in component:
+                continue
+
+            component.add(
+                node
+            )
+
+            unvisited.discard(
+                node
+            )
+
+            for neighbour in adjacency.get(
+                node,
+                (),
+            ):
+
+                if neighbour not in component:
+
+                    stack.append(
+                        neighbour
+                    )
+
+        components.append(
+            component
+        )
+
+    polylines = []
+
+    for component in components:
+
+        degrees = {
+            node: len(
+                [
+                    neighbour
+                    for neighbour in adjacency[node]
+                    if neighbour in component
+                ]
+            )
+            for node in component
+        }
+
+        endpoints = [
+            node
+            for node, degree in degrees.items()
+            if degree == 1
+        ]
+
+        if endpoints:
+
+            start = min(
+                endpoints,
+                key=lambda node: coordinates[node][1],
+            )
+
+        else:
+
+            start = min(
+                component,
+                key=lambda node: coordinates[node][1],
+            )
+
+        ordered_nodes = [start]
+        used_edges = set()
+
+        previous = None
+        current = start
+
+        while True:
+
+            candidates = []
+
+            for neighbour in adjacency[
+                current
+            ]:
+
+                if neighbour not in component:
+                    continue
+
+                edge = tuple(
+                    sorted(
+                        (
+                            current,
+                            neighbour,
+                        )
+                    )
+                )
+
+                if edge in used_edges:
+                    continue
+
+                candidates.append(
+                    neighbour
+                )
+
+            if not candidates:
+                break
+
+            if (
+                previous is None
+                or len(candidates) == 1
+            ):
+
+                next_node = candidates[0]
+
+            else:
+
+                incoming = (
+                    coordinates[current]
+                    - coordinates[previous]
+                )
+
+                incoming_norm = np.linalg.norm(
+                    incoming
+                )
+
+                best_score = -np.inf
+                next_node = candidates[0]
+
+                for candidate in candidates:
+
+                    outgoing = (
+                        coordinates[candidate]
+                        - coordinates[current]
+                    )
+
+                    outgoing_norm = np.linalg.norm(
+                        outgoing
+                    )
+
+                    if (
+                        incoming_norm == 0.0
+                        or outgoing_norm == 0.0
+                    ):
+
+                        score = -np.inf
+
+                    else:
+
+                        score = float(
+                            np.dot(
+                                incoming,
+                                outgoing,
+                            )
+                            / (
+                                incoming_norm
+                                * outgoing_norm
+                            )
+                        )
+
+                    if score > best_score:
+
+                        best_score = score
+                        next_node = candidate
+
+            edge = tuple(
+                sorted(
+                    (
+                        current,
+                        next_node,
+                    )
+                )
+            )
+
+            used_edges.add(
+                edge
+            )
+
+            previous = current
+            current = next_node
+
+            ordered_nodes.append(
+                current
+            )
+
+            if current == start:
+                break
+
+        polyline = np.vstack(
+            [
+                coordinates[node]
+                for node in ordered_nodes
+            ]
+        )
+
+        polylines.append(
+            polyline
+        )
+
+    return polylines
+
+
+def grounding_line_curve(mesh, H, zb):
+    """
+    Return the connected zeta=0.5 contour component with the largest
+    transverse y-span.
+    """
+
+    (
+        base_mesh,
+        zeta_base,
+    ) = make_base_grounding_fields(
+        mesh,
+        H,
+        zb,
+    )
+
+    segments = grounding_line_segments_on_base_mesh(
+        base_mesh,
+        zeta_base,
+    )
+
+    polylines = connected_polylines(
+        segments
+    )
+
+    if not polylines:
+
+        print(
+            "Warning: no grounding-line contour was found."
+        )
+
+        return (
+            np.asarray([], dtype=float),
+            np.asarray([], dtype=float),
+        )
+
+    def score(polyline):
+
+        y_span = (
+            np.max(
+                polyline[:, 1]
+            )
+            - np.min(
+                polyline[:, 1]
+            )
+        )
+
+        return (
+            y_span,
+            polyline.shape[0],
+        )
+
+    grounding_line = max(
+        polylines,
+        key=score,
+    )
+
+    # Only reverse the complete polyline if needed.
+    # Never sort x and y independently.
+    if (
+        grounding_line.shape[0] > 1
+        and grounding_line[0, 1]
+        > grounding_line[-1, 1]
+    ):
+
+        grounding_line = grounding_line[
+            ::-1
+        ]
+
+    x_gl = grounding_line[
+        :,
+        0,
+    ]
+
+    y_gl = grounding_line[
+        :,
+        1,
+    ]
+
+    print(
+        f"Grounding line: "
+        f"{x_gl.size} ordered points, "
+        f"x={np.min(x_gl):.3f} to "
+        f"{np.max(x_gl):.3f} km, "
+        f"y={np.min(y_gl):.3f} to "
+        f"{np.max(y_gl):.3f} km"
+    )
+
+    return (
+        x_gl,
+        y_gl,
+    )
+
+
+def add_grounding_line(
+    ax,
+    x_gl,
+    y_gl,
+):
+    """Draw the grounding line on an existing axis."""
 
     if x_gl.size == 0:
         return None
@@ -466,6 +991,7 @@ def add_grounding_line(ax, x_gl, y_gl):
         y_gl,
         color=grounding_line_color,
         linewidth=grounding_line_width,
+        linestyle="-",
         zorder=40,
         label="Grounding line",
     )
@@ -791,8 +1317,8 @@ def main():
     (
         x_gl,
         y_gl,
-        flotation_difference,
     ) = grounding_line_curve(
+        mesh,
         H,
         zb,
     )
@@ -807,12 +1333,6 @@ def main():
         "Upper-surface horizontal speed range: "
         f"{np.min(speed_values):.3f} to "
         f"{np.max(speed_values):.3f} m/yr"
-    )
-
-    print(
-        "Hydrostatic flotation-difference range: "
-        f"{np.min(flotation_difference):.6e} to "
-        f"{np.max(flotation_difference):.6e} m"
     )
 
     fig, axes = plt.subplots(
@@ -883,6 +1403,10 @@ def main():
         ha="left",
     )
 
+    # Limit the horizontal plotting range.
+    for ax in axes:
+        ax.set_xlim(300, 550)
+
     grounding_line_drawn = False
 
     for ax in axes:
@@ -913,8 +1437,7 @@ def main():
 
     output_filename = (
         f"{output_directory}/"
-        f"thickness_velocity_and_grounding_line_"
-        f"theta{theta:g}_dt{dt:g}_T{T:g}.png"
+        f"thickness_velocity_and_grounding_line_t10000.png"
     )
 
     plt.savefig(

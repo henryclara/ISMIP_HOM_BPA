@@ -10,11 +10,6 @@ from datetime import datetime
 from firedrake import *
 from config import *
 
-# ------------------------------------------------------------
-# Tell domain.py which checkpoint mesh to use when restarting.
-# This must happen BEFORE importing fields/spaces/geometry/etc.
-# ------------------------------------------------------------
-
 if restart_from is not None:
     os.environ["RESTART_MESH_FILE"] = str(restart_from)
 else:
@@ -79,7 +74,7 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_time")
+        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_testGJP_0.1")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         theta = Constant(theta_out)
@@ -200,7 +195,14 @@ for dt in dts:
                 },
             )
 
-            solver.solve()
+            try:
+                solver.solve()
+            except Exception as exc:
+                print("\n" + "!" * 80)
+                print(f"SIMULATION FAILED")
+                print(exc)
+                print("!" * 80 + "\n")
+                break
 
             nonlinear_iterations = solver.snes.getIterationNumber()
             print(
@@ -247,32 +249,47 @@ for dt in dts:
             sigma_ref = Function(Q1, name="sigma_ref")
             sigma_ref.interpolate((z_ref - zb) / thick)
 
+            n = FacetNormal(mesh3D)
+            u_adv = as_vector((ux_bar, uy_bar, 0.0))
+
+            u_n = 0.5 * (abs(dot(u_adv("+"), n("+"))) + abs(dot(u_adv("-"), n("-"))))
+            h_plus = (abs(n("+")[0]) * h_x("+") + abs(n("+")[1]) * h_y("+"))
+            h_minus = (abs(n("-")[0]) * h_x("-") + abs(n("-")[1]) * h_y("-"))
+
+            h_face = 0.5 * (h_plus + h_minus)
+
             if time_stepping == "im":
+
+                grad_H = as_vector((thick_new.dx(0),thick_new.dx(1),0.0))
+                grad_phi = as_vector((phi.dx(0),phi.dx(1),0.0))
+
+                gjp = (tau_gjp * h_face**2 * u_n * jump(grad_H, n) * jump(grad_phi, n) * dS_v)
+
                 F = (
                     thick_new * phi * dx
                     - thick * phi * dx
                     + dt * (ux_bar * thick_new).dx(0) * phi * dx
                     + dt * (uy_bar * thick_new).dx(1) * phi * dx
                     - dt * (a_s - a_b_Ice1r) * phi * dx
-                    # Artificial viscosity
-                    + dt * (mu_x * thick_new.dx(0) * phi.dx(0)
-                          + mu_y * thick_new.dx(1) * phi.dx(1)) * dx
+
+                    # Gradient-jump penalty
+                    + dt * gjp
                 )
 
             elif time_stepping == "im_mi":
-                H_mid = 0.5 * (thick_new + thick)
 
-                F = (
-                    thick_new * phi * dx
+                H_mid = 0.5 * (thick_new + thick)
+                grad_H_mid = as_vector((H_mid.dx(0),H_mid.dx(1),0.0))
+                grad_phi = as_vector((phi.dx(0),phi.dx(1),0.0))
+                gjp = (tau_gjp * h_face**2 * u_n * jump(grad_H_mid, n) * jump(grad_phi, n) * dS_v)
+
+                F = (thick_new * phi * dx
                     - thick * phi * dx
                     + dt * (ux_bar * H_mid).dx(0) * phi * dx
                     + dt * (uy_bar * H_mid).dx(1) * phi * dx
                     - dt * (a_s - a_b_Ice1r) * phi * dx
-                    # Artificial viscosity
-                    + dt * (
-                        mu_x * H_mid.dx(0) * phi.dx(0)
-                        + mu_y * H_mid.dx(1) * phi.dx(1)
-                    ) * dx
+                    # Gradient-jump penalty
+                    + dt * gjp
                 )
 
             old_thick = Function(Vbar)
@@ -291,10 +308,6 @@ for dt in dts:
 
             t = t_restart + step_number * dt
             print("Year:", t)
-
-            # ---------------------------------------------------------
-            # Save cumulative runtime at 100 and 200 model years
-            # ---------------------------------------------------------
 
             for milestone in runtime_milestones:
 

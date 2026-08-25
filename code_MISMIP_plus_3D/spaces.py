@@ -61,3 +61,26 @@ phi = TestFunction(Vbar)
 # -----------------------------
 
 thick_new = TrialFunction(Vbar)
+
+# ============================================================
+# 2D horizontal spaces for thickness evolution
+# ============================================================
+
+Q_H = FunctionSpace(base, "CG", 1)
+
+V_H = VectorFunctionSpace(
+    base,
+    "CG",
+    1,
+    dim=2,
+)
+
+# Thickness solution
+H_2D = Function(Q_H, name="H_2D")
+
+# Vertically averaged velocity represented on the base mesh
+ubar_2D = Function(V_H, name="u_bar_2D")
+
+# Test/trial functions for horizontal thickness equation
+phi_2D = TestFunction(Q_H)
+thick_new_2D = TrialFunction(Q_H)

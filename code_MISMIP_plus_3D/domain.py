@@ -28,10 +28,10 @@ if restart_mesh_file:
         base_coords = base.coordinates.dat.data_ro.copy()
         base_coords[:, 1] += shift
         base.coordinates.dat.data[:] = base_coords
-        
+
 else:
     # New simulation: load 2D Gmsh mesh and extrude
-    base = Mesh(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}.msh")
+    base = Mesh(f"Meshes/mesh_res_{str(int(coarse_res))}_{str(int(refined_res))}_unstructured.msh")
 
     # Keep this if you want the same y-coordinate shift
     # as in your previous RectangleMesh setup

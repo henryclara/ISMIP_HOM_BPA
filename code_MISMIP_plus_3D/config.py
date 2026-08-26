@@ -11,15 +11,14 @@ theta_outs = [1]
 FSSA_keyword = "full"
 zeta_pred = False
 time_stepping = "im"
+t = 0
 T = 8000
-output_int = 1
+output_int = 100
 coarse_res = 2000.0
 refined_res = 2000.0
 exp_name = "Ice0"  # "Ice0", "Ice1rr", "Ice1ra"
-t = 5000
 tau_gjp = Constant(0.1)
-
-restart_from = f"Simulations/remesh_mesh_res_2000_2000_unstructured/restart_t5000.h5"
+restart_from = None #f"Simulations/remesh_mesh_res_2000_2000_unstructured/restart_t5000.h5"
 # restart_from = f"Simulations/Ice1rr_theta{str(theta_outs[0])}_dt{str(dts[0])}_res{str(int(coarse_res))}_{str(int(refined_res))}_nz10/restart_t10100.h5"
 
 yearinsec = 365.25 * 24 * 60 * 60

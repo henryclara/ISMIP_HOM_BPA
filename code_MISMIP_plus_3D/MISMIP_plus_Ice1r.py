@@ -244,14 +244,15 @@ for dt in dts:
             cavity_thickness_2D = max_value(zb_2D - bed_2D, Constant(0.0))
 
             if exp_name == "Ice1rr" or (exp_name == "Ice1ra" and t < 10100):
-
                 a_b_Ice1r_2D = (Constant(0.2) * tanh(cavity_thickness_2D / Constant(75.0))
                     * max_value(-Constant(100.0) - zb_2D, Constant(0.0)))
-
             else:
                 a_b_Ice1r_2D = Constant(0.0)
 
-            if time_stepping == "im":
+            if time_stepping == "ex":
+                H_adv = thick_2D
+
+            elif time_stepping == "im":
                 H_adv = thick_new_2D
 
             elif time_stepping == "im_mi":

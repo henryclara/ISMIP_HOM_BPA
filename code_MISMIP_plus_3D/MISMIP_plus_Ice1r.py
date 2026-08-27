@@ -162,65 +162,6 @@ for dt in dts:
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
 
             gl_quad_degree = 3 # 1 and 5km meshes, integration points: 3 and 79 (Seroussi2014)
-
-            # ============================================================
-            # TEMPORARY DIAGNOSTIC: inspect zeta at basal quadrature points
-            # ============================================================
-
-            if local_step == 0:
-
-                # Same flotation function, but on the actual 2-D base mesh
-                phi_GL_2D = bed_2D + (rhoi / rhow) * thick_2D
-
-                # zeta = 0 grounded, 1 floating
-                zeta_2D = conditional(phi_GL_2D >= 0.0, 0.0, 1.0)
-
-                # Quadrature space using the SAME quadrature degree
-                # as the basal-friction integral
-                Qquad = FunctionSpace(
-                    base,
-                    "Quadrature",
-                    degree=gl_quad_degree,
-                )
-
-                # Evaluate phi and zeta at the quadrature points
-                phi_q = Function(Qquad, name="phi_at_quadrature")
-                zeta_q = Function(Qquad, name="zeta_at_quadrature")
-
-                phi_q.interpolate(phi_GL_2D)
-                zeta_q.interpolate(zeta_2D)
-
-                # Quadrature-point DoFs belonging to each triangle
-                cell_map = Qquad.cell_node_map().values
-
-                phi_by_cell = phi_q.dat.data_ro_with_halos[cell_map]
-                zeta_by_cell = zeta_q.dat.data_ro_with_halos[cell_map]
-
-                # Find triangles in which some quadrature points are grounded
-                # and others are floating
-                mixed = np.where(
-                    (np.min(zeta_by_cell, axis=1) < 0.5)
-                    & (np.max(zeta_by_cell, axis=1) > 0.5)
-                )[0]
-
-                print("\n" + "=" * 70)
-                print("SEP3 QUADRATURE TEST")
-                print("Quadrature degree:", gl_quad_degree)
-                print("Quadrature points per triangle:", zeta_by_cell.shape[1])
-                print("Triangles with both grounded and floating quadrature points:",
-                    len(mixed))
-
-                for cell in mixed[:10]:
-                    print(
-                        f"cell {cell}: "
-                        f"phi = {phi_by_cell[cell]}, "
-                        f"zeta = {zeta_by_cell[cell]}"
-                    )
-
-                print("=" * 70 + "\n")
-
-            #################
-
             F += ((1.0 - zeta) * C * dot(uvec, vvect) * ds_b(degree=gl_quad_degree))
 
             gamma = rhoi * g * (1 - (rhoi/rhow))

@@ -150,13 +150,13 @@ for dt in dts:
 
             # Discontinuous grounding/floating mask
             # zeta = 0 grounded, 1 floating
-            zeta = conditional(phi_GL > 0.0, 0.0, 1.0)
+            zeta = conditional(phi_GL >= 0.0, 0.0, 1.0)
 
             m = Constant(3.0)
 
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
 
-            gl_quad_degree = 8
+            gl_quad_degree = 3 # 1 and 5km meshes, integration points: 3 and 79 (Seroussi2014)
             F += ((1.0 - zeta) * C * dot(uvec, vvect) * ds_b(degree=gl_quad_degree))
 
             gamma = rhoi * g * (1 - (rhoi/rhow))

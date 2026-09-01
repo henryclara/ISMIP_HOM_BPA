@@ -17,8 +17,8 @@ Ly = float(Ly)
 h_coarse = float(coarse_res)
 h_fine = float(refined_res)
 
-x_ref_min = 300000.0
-x_ref_max = 400000.0
+x_ref_min = 200000.0
+x_ref_max = 550000.0
 
 # --------------------------------------------------
 # Geometry

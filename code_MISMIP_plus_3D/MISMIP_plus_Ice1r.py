@@ -85,7 +85,7 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_GJP_2D_thickness")
+        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_GJP_2D_thickness_implicit_GL")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         theta = Constant(theta_out)
@@ -155,6 +155,20 @@ for dt in dts:
 
             # Discontinuous grounding/floating mask
             # zeta = 0 grounded, 1 floating
+
+            if zeta_pred:
+                if theta_out == 0:
+                    div_flux = (thick * ux).dx(0) + (thick * uy).dx(1)
+                else:
+                    div_flux = q1.dx(0) + q2.dx(1)
+
+                H_pred = thick - dt * div_flux + dt * (a_s - a_b_Ice1r)
+                phi_GL_pred = bed + (rhoi/rhow) * H_pred
+
+                zeta_fric = 0.5 * (1.0 - tanh(phi_GL_pred / delta_GL))
+            else:
+                zeta_fric = conditional(phi_GL >= 0.0, 0.0, 1.0)
+
             zeta = conditional(phi_GL >= 0.0, 0.0, 1.0)
 
             m = Constant(3.0)
@@ -162,7 +176,7 @@ for dt in dts:
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
 
             gl_quad_degree = 3 # 1 and 5km meshes, integration points: 3 and 79 (Seroussi2014)
-            F += ((1.0 - zeta) * C * dot(uvec, vvect) * ds_b(degree=gl_quad_degree))
+            F += ((1.0 - zeta_fric) * C * dot(uvec, vvect) * ds_b(degree=gl_quad_degree))
 
             gamma = rhoi * g * (1 - (rhoi/rhow))
             gdash = rhoi * g

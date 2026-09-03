@@ -85,7 +85,7 @@ for dt in dts:
             )
 
         # Separate directory for each dt/theta combination.
-        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_GJP_2D_thickness_implicit_GL")
+        run_dir = Path(f"Simulations/{exp_name}_theta{theta_out:g}_dt{dt:g}_res{int(coarse_res)}_{int(refined_res)}_nz{nz}_GJP_2D_thickness")
         run_dir.mkdir(parents=True, exist_ok=True)
 
         theta = Constant(theta_out)
@@ -150,12 +150,18 @@ for dt in dts:
 
             F -= rhoi * g * zs * (v1.dx(0) + v2.dx(1)) * dx
 
+            z = SpatialCoordinate(mesh3D)[2]
+            p_o = conditional(z < 0.0, -rhow * g * z, 0.0)
+            calving_traction = (rhoi * g * (zs - z) - p_o)
+
+            F -= calving_traction * (n[0] * v1 + n[1] * v2) * ds(2, domain=mesh3D)
+
             # Hydrostatic flotation function
             phi_GL = bed + (rhoi/rhow) * thick
 
             # Discontinuous grounding/floating mask
             # zeta = 0 grounded, 1 floating
-
+            '''
             if zeta_pred:
                 if theta_out == 0:
                     div_flux = (thick * ux).dx(0) + (thick * uy).dx(1)
@@ -168,28 +174,35 @@ for dt in dts:
                 zeta_fric = 0.5 * (1.0 - tanh(phi_GL_pred / delta_GL))
             else:
                 zeta_fric = conditional(phi_GL >= 0.0, 0.0, 1.0)
+            '''
+            if zeta_pred:
+                #H_pred = thick - dt * (q1.dx(0) + q2.dx(1)) + dt * (a_s - a_b_Ice1r)
+                phi_GL_pred = bed + (rhoi/rhow) * (thick - dt * (q1.dx(0) + q2.dx(1)) + dt * (a_s - a_b_Ice1r))
+                zeta = conditional(bed + (rhoi/rhow) * (thick - dt * (q1.dx(0) + q2.dx(1)) + dt * (a_s - a_b_Ice1r)) >= 0.0, 0.0, 1.0)
 
-            zeta = conditional(phi_GL >= 0.0, 0.0, 1.0)
+            else:
+                zeta = conditional(phi_GL >= 0.0, 0.0, 1.0)
+
+            #zeta = conditional(phi_GL >= 0.0, 0.0, 1.0)
 
             m = Constant(3.0)
 
             C = beta2 * sqrt(dot(uvec, uvec) + Constant(1.0e-10)**2) ** (1.0/m - 1.0)
 
             gl_quad_degree = 3 # 1 and 5km meshes, integration points: 3 and 79 (Seroussi2014)
-            F += ((1.0 - zeta_fric) * C * dot(uvec, vvect) * ds_b(degree=gl_quad_degree))
+            F += ((1.0 - zeta) * C * dot(uvec, vvect) * ds_b(degree=gl_quad_degree))
 
             gamma = rhoi * g * (1 - (rhoi/rhow))
-            gdash = rhoi * g
 
             if theta_out != 0 and FSSA_keyword == "full":
                 # First line (excluding first term)
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1.dx(0) + v2.dx(1)) * dx
+                F -= ((1 - zeta) * rhoi * g  + zeta * gamma) * dt * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1.dx(0) + v2.dx(1)) * dx
 
                 # Second line
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
+                F -= ((1 - zeta) * rhoi * g + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zs.dx(0) + v2 * zs.dx(1)) * ds_t
 
                 # Third line
-                F -= ((1 - zeta) * gdash + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zb.dx(0) + v2 * zb.dx(1)) * ds_b
+                F -= ((1 - zeta) * rhoi * g + zeta * gamma) * dt * n[2] * (-q1.dx(0) - q2.dx(1) + a_s - zeta * a_b_Ice1r) * (v1 * zb.dx(0) + v2 * zb.dx(1)) * ds_b
                 
                 F += dot(q - thick * uvec, r) * dx
 

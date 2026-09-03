@@ -15,7 +15,7 @@ from geometry import mismip_bed
 # -----------------------------------------------------------------------------
 
 INPUT_RESTART = Path(
-    "Simulations/Ice0_theta1_dt0.5_res2000_2000_nz10_GJP_2D_thickness/"
+    "Simulations/Ice0_theta1_dt1_res2000_2000_nz10_GJP_2D_thickness/"
     "restart_t8000.h5"
 )
 
